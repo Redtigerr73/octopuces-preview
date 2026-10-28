@@ -1,6 +1,6 @@
 /* Service worker de la démo : l'app reste utilisable sans réseau, et reçoit les captures partagées depuis WhatsApp, Instagram ou la galerie.
    Réseau d'abord (la démo publiée est toujours à jour), cache en secours. Rien n'est envoyé à un serveur : la capture partagée reste sur le téléphone. */
-const CACHE = 'etiket-app-v3';
+const CACHE = 'etiket-app-v4';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'assets/app.css', 'assets/app.js', 'assets/engine.js', 'assets/data.js', 'assets/i18n.js', 'assets/i18n-octo.js',
   'assets/i18n-guide.js', 'assets/i18n-scan.js', 'assets/i18n-tour.js', 'assets/icons.js', 'assets/theme.js', 'assets/icon.svg', 'assets/icon-192.png', 'assets/fonts/archivo-wdth.woff2', 'assets/fonts/stencil-800.woff2'];
 

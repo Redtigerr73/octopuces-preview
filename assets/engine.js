@@ -247,7 +247,7 @@ ${lines.map(l => `  <cac:InvoiceLine><cbc:ID>${l.n}</cbc:ID><cbc:InvoicedQuantit
   const FR_ST = String.raw`(?:${['rue', 'avenue', 'av\.', 'chaussée', 'boulevard', 'bd', 'place', 'quai', 'drève', 'clos', 'square', 'allée', 'impasse', 'chemin'].map(anyCase).join('|')})(?:\s+[A-Za-zÀ-ÿ'’.-]+){1,5}?`;
   const NL_ST = "[A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]*(?:straat|laan|lei|steenweg|plein|weg|dreef|kaai|vest)";
   const ADDRESS = new RegExp(String.raw`((?:${FR_ST}|${NL_ST})\s+\d{1,4}[a-zA-Z]?(?:\s*(?:bte|bus|boîte)\s*\w+)?)\s*[,\-–—]?\s*(\d{4})\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+(?:[ -][A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+)*)`, 'g');
-  function parseContact(text) {
+  function parseContact(text, opts = {}) {
     const t = String(text || '');
     const uniq = a => [...new Set(a)];
     const emails = uniq(t.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || []);
@@ -276,10 +276,15 @@ ${lines.map(l => `  <cac:InvoiceLine><cbc:ID>${l.n}</cbc:ID><cbc:InvoicedQuantit
     const agreed = last ? Number(last[1].replace(/\D/g, '') + (last[2] ? `.${last[2]}` : '')) : null;
     // nom : seulement après une formule explicite (« je m'appelle », « nom : », « mijn naam is »), jamais deviné dans le reste
     const NAME = "[A-ZÀ-Ý][a-zà-ÿ'’-]+";
-    const names = uniq([...t.matchAll(new RegExp(String.raw`(?:[Jj]e m['’]appelle|[Mm]on nom (?:est|c['’]est)|\b[Nn]om\s*:|[Aa]u nom de|[Mm]ijn naam is|[Ii]k heet|\b[Nn]aam\s*:|[Oo]p naam van)\s+(${NAME}(?:[ -]${NAME})?)`, 'g'))].map(m => m[1]));
+    const names0 = uniq([...t.matchAll(new RegExp(String.raw`(?:[Jj]e m['’]appelle|[Mm]on nom (?:est|c['’]est)|\b[Nn]om\s*:|[Aa]u nom de|[Mm]ijn naam is|[Ii]k heet|\b[Nn]aam\s*:|[Oo]p naam van)\s+(${NAME}(?:[ -]${NAME})?)`, 'g'))].map(m => m[1]));
+    const nameKey = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[\s-]+/).filter(Boolean).sort().join(' ');
+    const shopNames = new Set((opts.exclude || []).map(nameKey));
+    const names = names0.filter(n => !shopNames.has(nameKey(n)));  // le nom du commerçant n'est jamais celui du client
     return { phones, emails, handles, addresses, amounts, agreed, names };
   }
 
+  // mots qui suivent souvent un prénom dicté sans en faire partie
+  const FILLERS = /^(?:et|en|and|mon|ma|mes|mijn|je|j|ik|voici|voilà|voila|alors|donc|dus|ok|oui|ja|merci|bedankt|bonjour|dag|pour|voor|de|du|des|le|la|les|het|van|à|au|aux|qui|que|et|is|en|bel|appelez|bellen)$/i;
   // Texte dicté (reconnaissance vocale) → texte lisible par parseContact : « arobase », « point com », majuscule de la commune
   function fromSpeech(text) {
     const dots = s => s.replace(/\s+(?:point|punt)\s+/gi, '.');
@@ -292,7 +297,7 @@ ${lines.map(l => `  <cac:InvoiceLine><cbc:ID>${l.n}</cbc:ID><cbc:InvoicedQuantit
       .replace(/(\b\d{4}\s+)([a-zà-ÿ])/g, (m, a, b) => a + b.toUpperCase())
       // nom dit après « je m'appelle », « mijn naam is »… : la reconnaissance vocale le rend souvent en minuscules
       .replace(/((?:je m['’]appelle|mon nom (?:est|c['’]est)|nom\s*:|au nom de|mijn naam is|ik heet|naam\s*:|op naam van)\s+)([a-zà-ÿ][a-zà-ÿ'’-]+)(?:([ -])([a-zà-ÿ][a-zà-ÿ'’-]+))?/gi,
-        (m, a, b, sep, c) => a + b[0].toUpperCase() + b.slice(1) + (c && !/^(?:et|en|and|mon|ma|mijn|je|ik)$/i.test(c) ? sep + c[0].toUpperCase() + c.slice(1) : sep && c ? sep + c : ''));
+        (m, a, b, sep, c) => a + b[0].toUpperCase() + b.slice(1) + (c && !FILLERS.test(c) ? sep + c[0].toUpperCase() + c.slice(1) : sep && c ? sep + c : ''));
   }
 
   // Montant écrit à la belge (« 1 450 », « 1.450,00 », « 300,5 ») → nombre, ou NaN

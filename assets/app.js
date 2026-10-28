@@ -1127,7 +1127,7 @@
         pass++;
       }
       return lines.join('\n');
-    } finally { worker.terminate(); }
+    } finally { worker.terminate().catch(() => {}); }
   }
   window.EtiketOCR = { readImage, parse: E.parseContact };  // exposé pour les tests de bout en bout
 
@@ -1166,17 +1166,19 @@
 
   // Dictée : la reconnaissance vocale du navigateur (fr-BE ou nl-BE) écrit dans le champ ; à l'arrêt, onDone relance l'analyse
   const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const liveDictations = new Set();  // micros ouverts : tous coupés au changement d'écran
   function dictate(target, onDone) {
     const x = L().voice;
     if (!Speech) return h('p', { class: 'hint', text: x.none });
     let rec = null;
     const live = h('span', { class: 'dictate-live' });  // texte provisoire : visible, pas annoncé à chaque mot
     const b = h('button', { type: 'button', class: 'btn small dictate', 'aria-pressed': 'false', onclick: () => (rec ? rec.stop() : start()) }, icon('mic'), h('span', { text: x.start }));
-    const idle = () => { rec = null; b.setAttribute('aria-pressed', 'false'); b.lastChild.textContent = x.start; live.textContent = ''; };
+    const idle = () => { if (rec) liveDictations.delete(rec); rec = null; b.setAttribute('aria-pressed', 'false'); b.lastChild.textContent = x.start; live.textContent = ''; };
     function start() {
       const base = target.value.trim();
       let heard = '';
       rec = new Speech();
+      liveDictations.add(rec);
       rec.lang = P.lang === 'nl' ? 'nl-BE' : 'fr-BE'; rec.interimResults = true; rec.continuous = true;
       rec.onresult = e => {
         if (!b.isConnected) { rec?.abort(); return; }  // fenêtre fermée ou écran quitté : le micro se coupe
@@ -1190,7 +1192,7 @@
       rec.onend = () => { idle(); if (heard) onDone?.(target.value); };
       try { rec.start(); b.setAttribute('aria-pressed', 'true'); b.lastChild.textContent = x.stop; live.textContent = x.listening; } catch { idle(); toast(x.fail); }
     }
-    const wrap = h('span', { class: 'dictate-wrap' }, b, live);
+    const wrap = h('span', { class: 'dictate-wrap' }, b, live, h('span', { class: 'note dictate-privacy', text: x.privacy }));
     wrap.stop = () => rec?.abort();
     return wrap;
   }
@@ -1234,7 +1236,7 @@
     const showParsed = text => {
       if (text.replace(/\s/g, '').length < 3) { fill(out, h('p', { class: 'alert' }, icon('alert'), x.editHint)); stepTo(0); return; }
       stepTo(2);
-      fill(out, review(E.parseContact(text), text, actions));
+      fill(out, review(E.parseContact(text, { exclude: [S.shop.owner, S.shop.legal] }), text, actions));
       out.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     };
     const runFile = async file => {
@@ -1290,7 +1292,7 @@
       stageBox,
       h('div', { class: 'sub-panel stack scan-text' }, field(x.textLabel, paste, x.textHint),
         h('div', { class: 'row' }, dict, btn(x.analyse, () => showParsed(paste.value), 'small primary', 'search')),
-        Speech ? h('p', { class: 'note', text: l.voice.privacy }) : null),
+        null),
       out);
     const stop = () => { ctrl?.abort(); ctrl = null; dict.stop?.(); listen.abort(); if (scanOff === stop) scanOff = null; };
     scanOff = stop;
@@ -1304,7 +1306,7 @@
     const handle0 = found.handles.find(hh => hh.toLowerCase() !== `@${S.shop.instagram}`.toLowerCase()) || '';
     const amount0 = found.agreed ?? (found.amounts.length ? found.amounts[found.amounts.length - 1] : null);
     const F = {
-      name: { on: !!found.names[0], val: found.names[0] || '', alts: found.names },
+      name: { on: !!found.names.length, val: found.names[found.names.length - 1] || '', alts: found.names },
       phone: { on: !!found.phones[0], val: found.phones[0] || '', alts: found.phones },
       email: { on: !!found.emails[0], val: found.emails[0] || '', alts: found.emails },
       handle: { on: !!handle0, val: handle0, alts: found.handles.filter(hh => hh.toLowerCase() !== `@${S.shop.instagram}`.toLowerCase()) },
@@ -2095,6 +2097,9 @@
   function applyPrefs() { document.documentElement.dataset.theme = P.theme; document.documentElement.lang = P.lang; }
   let first = true, renderReason = 'nav';
   function render() {
+    scanOff?.();  // lecture, dictée et écoute du collage de l'écran précédent
+    for (const rec of liveDictations) { try { rec.abort(); } catch { /* déjà arrêtée */ } }
+    liveDictations.clear();
     applyPrefs();
     const app = document.getElementById('app');
     const [path, qs] = location.hash.replace(/^#\/?/, '').split('?');

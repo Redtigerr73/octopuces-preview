@@ -345,3 +345,11 @@ test('dictated names get their capitals back, foreign numbers and number-first s
   assert.equal(E.checkField('amount', '1.450,00'), 'ok');
   assert.equal(E.checkField('amount', 'abc'), 'bad');
 });
+
+test('the shop owner is never taken as the customer; a spoken filler word is not part of a name', () => {
+  const chat = "Bonjour, je m'appelle Arnaud, c'est pour le buffet ?\nOui ! Je m'appelle Léa Martin";
+  assert.deepEqual(E.parseContact(chat, { exclude: ['Arnaud', 'Linthout Arnaud'] }).names, ['Léa Martin']);
+  assert.deepEqual(E.parseContact('Mijn naam is Arnaud Linthout', { exclude: ['Linthout Arnaud'] }).names, []);
+  assert.deepEqual(E.parseContact(E.fromSpeech("je m'appelle léa voici mon numéro 0470 00 00 77")).names, ['Léa']);
+  assert.deepEqual(E.parseContact(E.fromSpeech('mijn naam is jan dus bel me')).names, ['Jan']);
+});

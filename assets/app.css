@@ -631,3 +631,5 @@ dialog.sheet .sheet-head { display: flex; align-items: center; justify-content: 
   @keyframes verify-in { from { opacity: 0; transform: translateY(8px); } }
 }
 
+
+.dictate-privacy { display: block; flex-basis: 100%; margin-top: 4px; }
