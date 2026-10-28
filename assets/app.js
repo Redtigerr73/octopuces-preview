@@ -119,6 +119,17 @@
     if (p.photos > 1) box.append(h('span', { class: 'count', text: L().photosN(p.photos) }));
     return box;
   }
+  const hasPhoto = p => !!(p.images?.length || window.SEED.photosAvailable.includes(p.photo));
+  // intégration officielle d'Instagram (iframe /embed/) : la photo reste chez Instagram, rien n'est copié
+  function igEmbed(code, p) {
+    if (!/^[A-Za-z0-9_-]{5,20}$/.test(code)) return null;
+    const fig = h('figure', { class: 'ig-embed' });
+    const load = () => fill(fig, h('iframe', { src: `https://www.instagram.com/p/${code}/embed/`, title: L().igx.embed, loading: 'lazy',
+      sandbox: 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox', referrerpolicy: 'strict-origin-when-cross-origin' }),
+      h('figcaption', { class: 'note', text: L().igx.embedNote }));
+    fill(fig, h('div', { class: 'card-ph' }, photoEl(p)), h('div', { class: 'ig-consent' }, btn(L().igx.load, load, 'small', 'instagram'), h('p', { class: 'note', text: L().igx.loadNote })));
+    return fig;
+  }
   const tagEl = (p, big) => h('div', { class: `${big ? 'tag big' : 'tag'}${isPrivate(p) ? ' private' : ''}` }, h('span', { class: 'no', text: String(p.no) }),
     p.price ? h('span', { class: 'price', text: money(p.price).replace(',00', '') }) : null);
   const pill = (state, text) => h('span', { class: `pill ${state}`, text });
@@ -215,9 +226,9 @@
   }
 
   /* ---------- Coque ---------- */
-  const NAV = [['home', '#/', 'home'], ['stock', '#/stock', 'stock'], ['listings', '#/listings', 'listings'], ['sales', '#/sales', 'sales'],
+  const NAV = [['home', '#/', 'home'], ['scan', '#/scan', 'scan'], ['stock', '#/stock', 'stock'], ['listings', '#/listings', 'listings'], ['sales', '#/sales', 'sales'],
     ['deliveries', '#/deliveries', 'truck'], ['customers', '#/customers', 'user'], ['payments', '#/payments', 'payments'], ['accounting', '#/accounting', 'accounting'],
-    ['consign', '#/consign', 'consign'], ['brocante', '#/brocante', 'tent'], ['settings', '#/settings', 'settings']];
+    ['consign', '#/consign', 'consign'], ['brocante', '#/brocante', 'tent'], ['guide', '#/guide', 'guide'], ['settings', '#/settings', 'settings']];
   function counts() {
     return { stock: S.pieces.filter(p => p.status === 'draft').length, listings: toRemove().length + newPosts().length, payments: unmatched().length + promised().length,
       consign: duePayouts().length, accounting: S.inbox.filter(i => i.state === 'new').length, deliveries: deliveries().filter(s => s.delivery.status === 'failed').length,
@@ -239,13 +250,15 @@
       icon('search'), h('input', { name: 'q', type: 'search', placeholder: l.search, 'aria-label': l.search }));
     const top = h('header', { class: 'top' }, brand(), search, h('span', { class: 'grow' }),
       link('#/stock?focus=1', { class: 'icon-btn search-btn', 'aria-label': l.search }, icon('search')), langBtn);
-    const MOBILE = ['home', 'stock', 'add', 'sales'];
+    const MOBILE = ['home', 'stock', 'add', 'sales', 'scan'];
     const more = () => sheet(l.nav.more, h('nav', { class: 'menu' }, NAV.filter(([k]) => !MOBILE.includes(k)).map(([k, href, ic]) =>
       link(href, { onclick: () => document.querySelector('dialog')?.close() }, icon(ic), l.nav[k], c[k] ? h('span', { class: 'count', text: String(c[k]) }) : null))));
     const bottom = h('nav', { class: 'bottom', 'aria-label': 'Navigation' },
       link('#/', { 'aria-current': cur('home') }, icon('home'), h('span', { text: l.nav.home })),
       link('#/stock', { 'aria-current': cur('stock') }, icon('stock'), h('span', { text: l.nav.stock })),
-      link('#/add', { class: 'add-tab', 'aria-current': cur('add') }, h('span', { class: 'plus' }, icon('plus')), h('span', { text: l.nav.add })),
+      h('button', { type: 'button', class: 'add-tab', 'aria-current': cur('add'), 'aria-haspopup': 'dialog', onclick: () => sheet(l.quick.title, h('nav', { class: 'menu quick' },
+        [['#/add', 'camera', l.quick.add], ['#/scan', 'scan', l.quick.scan], ['#/stock?f=live', 'sales', l.quick.sell], ['#/brocante?add=1', 'tent', l.quick.family]].map(([href, ic, text]) =>
+          link(href, { onclick: () => document.querySelector('dialog')?.close() }, icon(ic), h('span', { text })))) ) }, h('span', { class: 'plus' }, icon('plus')), h('span', { text: l.nav.add })),
       link('#/sales', { 'aria-current': cur('sales') }, icon('sales'), h('span', { text: l.nav.sales })),
       h('button', { type: 'button', 'aria-current': MOBILE.includes(section) ? null : 'page', onclick: more }, icon('more'), h('span', { text: l.nav.more }),
         Object.entries(c).some(([k, v]) => v && !MOBILE.includes(k)) ? h('span', { class: 'dot', 'aria-hidden': 'true' }) : null));
@@ -283,6 +296,8 @@
     const fmtS = s => `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, '0')} s`;
     return [
       head(l.hello(S.shop.owner), todayText, link('#/add', { class: 'btn tagged big' }, icon('plus'), l.nav.add)),
+      S.guideSeen ? null : h('div', { class: 'guide-banner' }, icon('guide'), h('span', { text: l.guide.banner }),
+        h('span', { class: 'row' }, link('#/guide', { class: 'btn small primary' }, l.guide.see), btn(l.guide.hide, () => { S.guideSeen = true; save(); render(); }, 'small'))),
       h('div', { class: 'figures' },
         h('div', { class: 'fig' }, h('span', { class: 'lbl', text: l.kSales }), h('b', { text: money(monthSales.reduce((x, s) => x + s.price, 0)) }), h('span', { text: l.kSalesN(monthSales.length) })),
         h('div', { class: 'fig' }, h('span', { class: 'lbl', text: l.kCashed }), h('b', { text: money(cashed) }), h('span', { text: P.lang === 'nl' ? 'Mollie, bank, kassa' : 'Mollie, banque, caisse' })),
@@ -321,15 +336,15 @@
   }
 
   /* ---------- Fiche pièce ---------- */
-  const fullListing = (p, lang) => { const x = E.listingText({ ...p, price: p.price || 0 }, lang, S.shop.city[lang]); return `${x.title}\n\n${x.body}\n\n${S.shop.delivery[lang]}.`; };
+  const fullListing = (p, lang) => { const x = E.listingText({ ...p, price: p.price || 0 }, lang, S.shop.city[lang]); return `${x.title}\n\n${x.body}${isPrivate(p) ? '' : `\n\n${S.shop.delivery[lang]}.`}`; };
   function listingRows(p) {
     const l = L();
-    return CHANNELS.map(ch => {
+    return CHANNELS.filter(ch => !(isPrivate(p) && ch === 'site')).map(ch => {
       const lst = p.listings?.[ch];
       const st = lst?.state || 'none';
       let acts = [];
       if (ch === 'site') acts = st === 'none' ? [] : [h('span', { class: 'muted', text: l.lstSite })];
-      else if (ch === 'ig' && (st === 'none' || st === 'draft')) acts = [btn(l.ig.publish, () => { p.listings.ig = { state: 'live', url: `https://www.instagram.com/${S.shop.instagram}/` }; save(); render(); toast(l.ig.published); }, 'small primary', 'instagram')];
+      else if (ch === 'ig' && !isPrivate(p) && (st === 'none' || st === 'draft')) acts = [btn(l.ig.publish, () => { p.listings.ig = { state: 'live', url: `https://www.instagram.com/${S.shop.instagram}/` }; save(); render(); toast(l.ig.published); }, 'small primary', 'instagram')];
       else if (st === 'none' || st === 'draft') acts = [btn(l.piece.copy, () => copy(fullListing(p, P.lang)), 'small', 'copy'), ext(createUrl(ch), l.lstOpen), btn(l.lstDone, () => published(p, ch), 'small primary', 'check')];
       else if (st === 'live' && lst.url) acts = [ext(lst.url, ch === 'ig' ? l.ig.open : l.lstSeen)];
       else if (st === 'to-remove') acts = [lst.url ? ext(lst.url, l.lstSeen) : null, btn(l.lstRemoved, () => { lst.state = 'removed'; save(); render(); toast(l.lstRemoved); }, 'small primary', 'check')];
@@ -356,7 +371,7 @@
     const priv = isPrivate(p);
     const dep = p.origin === 'depot' ? depositor(p.depositor) : null;
     const textBox = h('div', { class: 'textbox' });
-    const fillText = () => { const x = E.listingText({ ...p, price: p.price || 0 }, lang, S.shop.city[lang]); fill(textBox, h('b', { text: x.title }), x.body, `\n\n${S.shop.delivery[lang]}.`); };
+    const fillText = () => { const x = E.listingText({ ...p, price: p.price || 0 }, lang, S.shop.city[lang]); fill(textBox, h('b', { text: x.title }), x.body, priv ? null : `\n\n${S.shop.delivery[lang]}.`); };
     fillText();
     const segBox = h('span', {});
     const paintSeg = () => fill(segBox, seg([['fr', 'FR'], ['nl', 'NL']], lang, k => { lang = k; fillText(); paintSeg(); }));
@@ -374,8 +389,8 @@
     return [
       crumb(priv ? '#/brocante' : '#/stock', priv ? l.nav.brocante : l.piece.back),
       h('div', { class: 'piece' },
-        h('div', { class: 'gallery' }, h('div', { class: 'card-ph' }, photoEl(p)),
-          thumbs > 1 ? h('div', { class: 'thumbs' }, Array.from({ length: thumbs }, (_, i) => {
+        h('div', { class: 'gallery' }, !hasPhoto(p) && p.ig ? igEmbed(p.ig, p) : h('div', { class: 'card-ph' }, photoEl(p)),
+          thumbs > 1 && (hasPhoto(p) || !p.ig) ? h('div', { class: 'thumbs' }, Array.from({ length: thumbs }, (_, i) => {
             const t = h('div', { class: 'ph drawn', style: `background: var(--ph${((p.tone || 0) + i) % 8})` });
             if (p.images?.[i]) t.append(h('img', { src: p.images[i], alt: '' })); else t.append(drawing(p.cat));
             return t;
@@ -386,14 +401,16 @@
             h('div', { class: 'row no-print' },
               p.status === 'draft' ? link(`#/add/${p.id}`, { class: 'btn tagged' }, icon('camera'), l.piece.edit) : null,
               ['live', 'reserved'].includes(p.status) && !s ? link(`#/sell/${p.id}`, { class: 'btn primary' }, icon('sales'), l.piece.sell) : null,
+              ['live', 'reserved'].includes(p.status) && !s ? link(`#/sell/${p.id}?scan=1`, { class: 'btn tagged' }, icon('scan'), l.sellx.interested) : null,
               p.status === 'live' && !priv ? btn(l.piece.reserve, () => { p.status = 'reserved'; save(); render(); toast(l.status.reserved); }) : null,
               p.status === 'reserved' && !s ? btn(l.piece.unreserve, () => { p.status = 'live'; save(); render(); }) : null,
               s ? link(`#/sale/${s.id}`, { class: 'btn' }, icon('sales'), l.piece.seeSale) : null,
               btn(l.piece.printTag, () => window.print(), '', 'print'))),
           priv ? h('p', { class: 'alert' }, icon('tent'), l.broc.noInvoice) : null,
           h('dl', { class: 'facts' }, facts.map(([dt, dd]) => h('div', {}, h('dt', { text: dt }), h('dd', { text: dd })))),
-          priv ? null : panel(l.piece.channels, null, h('div', { class: 'chan' }, listingRows(p))),
-          priv ? null : panel(l.piece.listingText, segBox, textBox, h('div', { class: 'row', style: 'margin-top:10px' }, btn(l.piece.copy, () => copy(fullListing(p, lang)), '', 'copy'))),
+          (prepareShare(p), null),
+          panel(l.piece.channels, btn(l.sendx.shareListing, () => shareListing(p), 'small tagged', 'share'), priv ? h('p', { class: 'hint', style: 'margin-bottom:10px', text: l.famx.hint }) : null, h('div', { class: 'chan' }, listingRows(p))),
+          panel(l.piece.listingText, segBox, textBox, h('div', { class: 'row', style: 'margin-top:10px' }, btn(l.piece.copy, () => copy(fullListing(p, lang)), '', 'copy'))),
           priv ? null : panel(l.piece.fiscal, null, p.price ? fiscalBlock(p, s ? Math.abs(s.price) : p.price) : h('p', { class: 'muted', text: l.missingList(l.missing.price) })),
           panel(l.piece.history, null, h('ol', { class: 'timeline' }, history.map(([d, t]) => h('li', {}, h('span', {}, h('time', { text: E.date(d) }), t)))))))
     ];
@@ -586,11 +603,13 @@
     if (!p || p.saleId || !['live', 'reserved'].includes(p.status)) { location.replace(p ? `#/piece/${p.id}` : '#/stock'); return []; }
     const priv = isPrivate(p);
     const linked = q.get('pay') ? S.feed.find(x => x.id === q.get('pay') && !x.saleId) : null;
-    if (!sellForm || sellForm.pid !== p.id || sellForm.pay !== (linked?.id || null)) {
+    const fromScan = !!q.get('scan');
+    if (fromScan) history.replaceState(null, '', `#/sell/${p.id}`);
+    if (fromScan || !sellForm || sellForm.pid !== p.id || sellForm.pay !== (linked?.id || null)) {
       const start = linked ? linked.amount : p.price || 0;
       sellForm = { pid: p.id, pay: linked?.id || null, customer: null, newCustomer: false, newName: '', newHandle: '', newVat: '', price: start,
         method: linked ? linked.method : 'bancontact', amount: start, deposit: false, depositState: 'validated',
-        mode: 'pickup', address: { street: '', zip: '', city: '' }, date: TODAY, slot: '' };
+        mode: 'pickup', address: { street: '', zip: '', city: '' }, date: TODAY, slot: '', newPhone: '', newEmail: '' };
     }
     const f = sellForm;
     let submitted = false;
@@ -622,6 +641,8 @@
       f.newCustomer ? h('div', { class: 'grid2' },
         field(l.cust.name, h('input', { class: 'input', value: f.newName, autocomplete: 'off', oninput: e => { f.newName = e.target.value; } })),
         field(l.cust.handle, h('input', { class: 'input', value: f.newHandle, autocomplete: 'off', placeholder: '@', oninput: e => { f.newHandle = e.target.value; } })),
+        field(l.sellx.phone, h('input', { class: 'input', type: 'tel', value: f.newPhone || '', oninput: e => { f.newPhone = e.target.value; } })),
+        field(l.sellx.email, h('input', { class: 'input', type: 'email', value: f.newEmail || '', oninput: e => { f.newEmail = e.target.value; } })),
         priv ? null : field(`${l.sell.vat} (${P.lang === 'nl' ? 'bedrijf' : 'entreprise'})`, h('input', { class: 'input', value: f.newVat, placeholder: 'BE0400000086', oninput: e => { f.newVat = e.target.value; paintExtra(); } }))) : null,
       isB2b() ? h('p', { class: E.validBce(cust()?.vat || f.newVat) ? 'alert good' : 'alert bad' }, icon('peppol'),
         E.validBce(cust()?.vat || f.newVat) ? `${l.sell.found} 0208:${String(cust()?.vat || f.newVat).replace(/\D/g, '')}` : l.sell.notFound)
@@ -634,6 +655,35 @@
           field(l.deliv.slot, h('input', { class: 'input', value: f.slot, placeholder: '18:00–20:00', oninput: e => { f.slot = e.target.value; } }))),
         f.address.zip && !inFreeZone(f.address) ? h('p', { class: 'alert' }, icon('alert'), l.deliv.outZone) : null] : null);
     paintWho(); paintDeliv();
+    // Conversation scannée : client reconnu ou nouveau, adresse de livraison et prix convenu repris, toujours modifiables
+    const scanNote = h('div', {});
+    const applyScan = (raw, text) => {
+      const own = `@${S.shop.instagram}`.toLowerCase();
+      const found = { ...raw, handles: raw.handles.filter(x => x.toLowerCase() !== own) };
+      const known = E.matchCustomer(found, S.customers);
+      if (known) { f.customer = known; f.newCustomer = false; }
+      else {
+        f.customer = null; f.newCustomer = true;
+        f.newHandle = found.handles[0] || f.newHandle; f.newName = f.newName || found.handles[0] || '';
+        f.newPhone = found.phones[0] || ''; f.newEmail = found.emails[0] || '';
+      }
+      const fake = known && customer(known).status === 'fake';
+      const addr = found.addresses[0] || (known && customer(known).addresses[0]);
+      if (addr && !fake) { f.mode = 'delivery'; f.address = { ...addr }; }
+      const near = v => v && v >= (p.price || 0) * 0.5 && v <= (p.price || v) * 1.5;
+      const agreed = linked ? null : near(found.agreed) ? found.agreed : E.agreedPrice(found.amounts, p.price || 0);
+      const usePrice = () => { f.price = agreed; priceIn.value = agreed; if (!f.deposit) { f.amount = agreed; if (amountIn) amountIn.value = agreed; } fill(fis, priv ? null : fiscalBlock(p, f.price)); paintExtra(); toast(l.sellx.price(money(agreed))); };
+      f.conv = String(text || '').slice(0, 600);
+      fill(scanNote, h('div', { class: fake ? 'alert bad' : 'alert good' }, icon(fake ? 'alert' : 'scan'), h('div', { class: 'stack', style: 'gap:6px' },
+        h('b', { text: l.sellx.scanned }),
+        h('span', { text: [known ? l.sellx.known(customer(known).name) : l.sellx.newFrom, addr ? fmtAddr(addr) : null].filter(Boolean).join(' — ') }),
+        fake ? h('span', { text: l.cust.fakeWarn }) : null,
+        agreed && agreed !== f.price ? btn(`${l.sellx.apply} ${money(agreed)}`, usePrice, 'small primary', 'check') : null)));
+      paintWho(); paintDeliv(); paintExtra();
+    };
+    const scanBtn = btn(l.sellx.scan, () => scanSheet(applyScan), 'tagged', 'scan');
+    if (fromScan) setTimeout(() => scanSheet(applyScan), 60);
+    if (q.get('fromscan') && pendingScan) { const ps = pendingScan; pendingScan = null; history.replaceState(null, '', `#/sell/${p.id}`); setTimeout(() => applyScan(ps.found, ps.text), 30); }
     const submit = e => {
       e.preventDefault();
       if (submitted || problem()) return;
@@ -642,8 +692,9 @@
       if (f.newCustomer) {
         cid = `c${Date.now()}`;
         S.customers.push({ id: cid, name: f.newName || f.newHandle || (P.lang === 'nl' ? 'Nieuwe klant' : 'Nouveau client'), handle: f.newHandle, channel: f.newHandle ? 'instagram' : 'shop',
-          phone: '', email: '', status: 'ok', vat: f.newVat || undefined, addresses: f.mode === 'delivery' ? [{ ...f.address }] : [], notes: '', since: TODAY });
-      } else if (cid && f.mode === 'delivery') {
+          phone: f.newPhone || '', email: f.newEmail || '', status: 'ok', vat: f.newVat || undefined, addresses: f.mode === 'delivery' ? [{ ...f.address }] : [], notes: '', since: TODAY, conv: f.conv });
+      } else if (cid && f.conv) { customer(cid).conv = f.conv; }
+      if (!f.newCustomer && cid && f.mode === 'delivery') {
         const c = customer(cid); if (!c.addresses.some(a => fmtAddr(a) === fmtAddr(f.address))) c.addresses.push({ ...f.address });
       }
       const n = nextNumber(priv ? 'B' : 'F');
@@ -699,7 +750,7 @@
       head(`${l.sell.title} : n° ${p.no}`, title(p)),
       h('form', { class: 'cols', onsubmit: submit },
         h('div', { class: 'stack' },
-          panel(l.sell.who, null, who),
+          panel(l.sell.who, scanBtn, scanNote, who),
           panel(l.deliv.choose, null, deliv),
           panel(l.sell.price, null, field(`${l.sell.price} (€)`, priceIn), h('div', { style: 'margin-top:14px' }, fis))),
         h('div', { class: 'stack' }, payPanel, extra, confirm))
@@ -832,7 +883,10 @@
         active && balance(s) > 0 ? btn(l.sales.addPayment, addPay, 'primary', 'payments') : null,
         btn(l.sales.print, () => window.print(), '', 'print'),
         s.peppol && !s.credit ? btn(l.sales.ubl, () => { code.textContent = ubl(); code.hidden = !code.hidden; }, '', 'peppol') : null,
+        !s.credit ? btn(l.sendx.button, () => sendSheet(b.c, saleKinds(s), saleMsgData(s)), 'tagged', 'chat') : null,
         active ? btn(s.private ? l.broc.deleteSale : l.cancel.title, () => cancelSale(s), 'danger', s.private ? 'trash' : 'sync') : null),
+      !s.credit ? h('div', { class: 'mobile-actions no-print' }, btn(l.sendx.button, () => sendSheet(b.c, saleKinds(s), saleMsgData(s)), 'tagged', 'chat'),
+        active && balance(s) > 0 ? btn(l.sales.addPayment, addPay, 'primary', 'payments') : null) : null,
       s.cancelled ? h('p', { class: 'alert bad' }, icon('alert'), l.cancel.cancelled(s.cancelled)) : null,
       h('div', { class: 'cols-3' }, h('div', { class: 'stack' }, invoice, code),
         h('div', { class: 'stack no-print' },
@@ -914,6 +968,7 @@
         d.status === 'planned' ? btn(l.deliv.fail, fail, 'small', 'alert') : null,
         btn(l.deliv.edit, editAddr, 'small', 'edit'), btn(l.deliv.reschedule, reschedule, 'small', 'clock'),
         btn(l.deliv.copy, () => copy(fmtAddr(d.address)), 'small', 'copy'),
+        btn(l.sendx.notify, () => sendSheet(b.c, ['delivery', 'address'], saleMsgData(s)), 'small', 'chat'),
         d.status === 'failed' ? btn(s.private ? l.broc.deleteSale : l.deliv.relist, () => cancelSale(s), 'small danger', 'sync') : null) : null);
   }
   function viewDeliveries() {
@@ -951,40 +1006,191 @@
     });
     return tessLoading;
   }
+  // Prépare la capture pour la lecture : agrandie si petite, en niveaux de gris ; deux versions lues l'une après l'autre
+  // (les conversations mélangent bulles claires et foncées, et beaucoup de captures sont en mode sombre).
+  async function prepareImage(file) {
+    const bmp = await createImageBitmap(file);
+    let k = bmp.width < 1200 ? Math.min(2.5, 1600 / bmp.width) : Math.min(1, 2400 / bmp.width);
+    if (bmp.width * k * bmp.height * k > 14e6) k = Math.sqrt(14e6 / (bmp.width * bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * k)), hgt = Math.max(1, Math.round(bmp.height * k));
+    // « normal » : texte foncé sur fond clair ; « clair » : seul le texte presque blanc est gardé, en noir sur blanc
+    // (bulles bleues, grises ou noires du mode sombre).
+    const make = mode => {
+      const c = h('canvas', { width: w, height: hgt });
+      const x = c.getContext('2d', { willReadFrequently: true });
+      x.drawImage(bmp, 0, 0, w, hgt);
+      const img = x.getImageData(0, 0, w, hgt), d = img.data;
+      let min = 255, max = 0;
+      for (let i = 0; i < d.length; i += 4) { const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; d[i] = g; if (g < min) min = g; if (g > max) max = g; }
+      const span = Math.max(1, max - min);
+      for (let i = 0; i < d.length; i += 4) {
+        const g = mode === 'bright' ? (d[i] > 190 ? 0 : 255) : ((d[i] - min) * 255) / span;
+        d[i] = d[i + 1] = d[i + 2] = g; d[i + 3] = 255;
+      }
+      x.putImageData(img, 0, 0);
+      return c;
+    };
+    return [make('normal'), make('bright')];
+  }
   async function readImage(file, onProgress) {
     const T = await loadTesseract();
-    const worker = await T.createWorker(['fra', 'nld', 'eng'], 1, { logger: m => { if (m.status === 'recognizing text') onProgress(Math.round(m.progress * 100)); } });
-    try { return (await worker.recognize(file)).data.text; } finally { await worker.terminate(); }
+    const passes = await prepareImage(file);
+    let pass = 0;
+    const worker = await T.createWorker(['fra', 'nld', 'eng'], 1, { logger: m => {
+      if (m.status === 'recognizing text') onProgress(Math.round(((pass + m.progress) / passes.length) * 100));
+    } });
+    try {
+      const seen = new Set(), lines = [];
+      for (const canvas of passes) {
+        const text = (await worker.recognize(canvas)).data.text || '';
+        for (const line of text.split('\n').map(s => s.trim()).filter(s => s.length > 1)) {
+          const key = line.toLowerCase().replace(/\s+/g, ' ');
+          if (!seen.has(key)) { seen.add(key); lines.push(line); }
+        }
+        pass++;
+      }
+      return lines.join('\n');
+    } finally { await worker.terminate(); }
   }
   window.EtiketOCR = { readImage, parse: E.parseContact };  // exposé pour les tests de bout en bout
+  // Bloc de scan réutilisable (fenêtre ou écran) : capture choisie, partagée vers l'app ou collée ; texte lu modifiable ; actions fournies par l'appelant.
+  function scanUI(actions) {
+    const l = L(), x = l.scanx;
+    const out = h('div', { class: 'stack' });
+    const shot = h('div', {});
+    const paste = h('textarea', { class: 'input', rows: 5, placeholder: x.pastePh });
+    const showParsed = (text, fromImage) => {
+      const c = E.parseContact(text);
+      const rows = [[l.cust.phone, c.phones], [l.cust.email, c.emails], [l.cust.handle, c.handles], [l.cust.addresses, c.addresses.map(fmtAddr)], [l.cust.amounts, c.amounts.map(money)]].filter(([, v]) => v.length);
+      fill(out, fromImage ? h('p', { class: 'muted', text: x.chars(text.length) }) : null,
+        rows.length ? h('div', { class: 'stack' }, h('h3', { text: l.cust.found }),
+          h('dl', { class: 'facts' }, rows.map(([k, v]) => h('div', {}, h('dt', { text: k }), h('dd', { text: v.join(' — ') })))),
+          h('div', { class: 'stack' }, actions(c, text)))
+          : h('p', { class: 'alert' }, icon('alert'), h('span', {}, h('b', { text: l.cust.none }), h('br'), x.editHint)));
+    };
+    const runFile = async file => {
+      if (!/^image\//.test(file.type || 'image/') || file.size > 15 * 1024 * 1024) { fill(out, h('p', { class: 'alert bad' }, icon('alert'), x.tooBig)); return; }
+      const preview = h('img', { class: 'scan-preview', alt: '' }); preview.src = URL.createObjectURL(file);
+      const status = h('p', { class: 'row', role: 'status' }, icon('clock'), h('span', { text: l.cust.scanLoading }));
+      fill(out, status); fill(shot, preview);
+      try {
+        const text = await readImage(file, pr => { status.lastChild.textContent = l.cust.scanning(pr); });
+        paste.value = text;
+        if (text.replace(/\s/g, '').length < 3) fill(out, h('p', { class: 'alert bad' }, icon('alert'), x.noText));
+        else showParsed(text, true);
+      } catch { fill(out, h('p', { class: 'alert bad' }, icon('alert'), l.cust.scanFail)); }
+    };
+    const setText = t => { paste.value = t; showParsed(t, false); };
+    const inputId = `scan-in-${Math.random().toString(36).slice(2, 7)}`;
+    const input = h('input', { type: 'file', accept: 'image/*', class: 'sr', id: inputId, onchange: e => { const f = e.target.files[0]; if (f) runFile(f); e.target.value = ''; } });
+    const clip = navigator.clipboard || {};
+    const el = h('div', { class: 'stack' }, h('p', { class: 'muted', text: l.cust.scanHint }),
+      h('label', { class: 'dropzone', for: inputId }, icon('scan'), x.pick), input,
+      h('div', { class: 'row' },
+        clip.read ? btn(x.pasteShot, async () => {
+          try { for (const item of await clip.read()) { const type = item.types.find(t => t.startsWith('image/')); if (type) { runFile(await item.getType(type)); return; } } toast(x.clipEmpty); }
+          catch { toast(x.clipDenied); } }, 'small', 'download') : null,
+        clip.readText ? btn(x.pasteText, async () => { try { const t = await clip.readText(); if (t.trim()) setText(t); else toast(x.clipEmpty); } catch { toast(x.clipDenied); } }, 'small', 'copy') : null),
+      h('p', { class: 'hint', text: x.shareHint }),
+      shot, field(x.textLabel, paste), btn(x.analyse, () => showParsed(paste.value, false), 'small', 'search'), out);
+    return { el, runFile, setText };
+  }
   function scanSheet(onApply) {
     const l = L();
-    sheet(l.cust.scan, close => {
-      const out = h('div', { class: 'stack' });
-      const input = h('input', { type: 'file', accept: 'image/*', class: 'sr', id: 'scan-in', onchange: async e => {
-        const file = e.target.files[0]; if (!file) return;
-        const preview = h('img', { class: 'scan-preview', alt: '' }); preview.src = URL.createObjectURL(file);
-        const status = h('p', { class: 'row', role: 'status' }, icon('clock'), h('span', { text: l.cust.scanLoading }));
-        fill(out, preview, status);
-        try {
-          const text = await readImage(file, pr => { status.lastChild.textContent = l.cust.scanning(pr); });
-          showParsed(text);
-        } catch { fill(out, preview, h('p', { class: 'alert bad' }, icon('alert'), l.cust.scanFail)); }
-      } });
-      const showParsed = text => {
-        const c = E.parseContact(text);
-        const rows = [[l.cust.phone, c.phones], [l.cust.email, c.emails], [l.cust.handle, c.handles], [l.cust.addresses, c.addresses.map(fmtAddr)], [l.cust.amounts, c.amounts.map(money)]].filter(([, v]) => v.length);
-        fill(out, rows.length ? h('div', { class: 'stack' }, h('h3', { text: l.cust.found }),
-          h('dl', { class: 'facts' }, rows.map(([k, v]) => h('div', {}, h('dt', { text: k }), h('dd', { text: v.join(' — ') })))),
-          btn(l.cust.apply, () => { onApply(c, text); close(); }, 'primary big', 'check')) : h('p', { class: 'alert' }, icon('alert'), l.cust.none),
-          h('details', {}, h('summary', { text: l.cust.read }), h('pre', { class: 'code', text: text })));
+    sheet(l.cust.scan, close => scanUI((c, text) => [btn(l.cust.apply, () => { onApply(c, text); close(); }, 'primary big', 'check')]).el);
+  }
+
+  /* ---------- Écran « Scanner » : capture partagée depuis WhatsApp, Instagram, SMS ou la galerie ---------- */
+  let pendingScan = null;
+  function viewScan() {
+    const l = L(), x = l.scanx;
+    const ui = scanUI((c, text) => {
+      const known = E.matchCustomer({ ...c, handles: c.handles.filter(hh => hh.toLowerCase() !== `@${S.shop.instagram}`) }, S.customers);
+      const forSale = S.pieces.filter(p => ['live', 'reserved'].includes(p.status) && !p.saleId);
+      let pick = forSale[0]?.id || '';
+      return [
+        known ? h('p', { class: customer(known).status === 'fake' ? 'alert bad' : 'alert good' }, icon(customer(known).status === 'fake' ? 'alert' : 'user'), l.sellx.known(customer(known).name)) : null,
+        h('div', { class: 'sub-panel stack' }, h('h3', { text: x.sellTitle }),
+          field(x.whichPiece, h('select', { class: 'input', onchange: e => { pick = e.target.value; } },
+            forSale.map(p => h('option', { value: p.id, text: `n° ${p.no} ${title(p)} — ${money(p.price || 0)}${isPrivate(p) ? ` (${l.scope.private})` : ''}` })))),
+          btn(x.sellGo, () => { if (!pick) return; pendingScan = { found: c, text }; go(`#/sell/${pick}?fromscan=1`); }, 'primary big', 'sales')),
+        btn(known ? x.updateCust : x.newCust, () => {
+          if (known) { const k = customer(known); mergeContact(k, c); k.conv = text.slice(0, 600); save(); toast(l.cust.saved); go(`#/customer/${known}`); return; }
+          custDraft = { id: '', name: '', handle: '', channel: 'instagram', phone: '', email: '', status: 'ok', addresses: [], notes: '', since: TODAY, conv: text.slice(0, 600) };
+          mergeContact(custDraft, c); go('#/customer/new');
+        }, '', 'user')];
+    });
+    // capture ou texte partagés vers l'app installée (Android : « Partager → Etiket »), déposés par le service worker
+    if ('caches' in window) caches.open('etiket-share').then(async cache => {
+      const shotRes = await cache.match('shared-shot'), textRes = await cache.match('shared-text');
+      if (shotRes) { ui.runFile(await shotRes.blob()); await cache.delete('shared-shot'); }
+      if (textRes) { const t = await textRes.text(); await cache.delete('shared-text'); if (!shotRes && t.trim()) ui.setText(t); }
+    }).catch(() => {});
+    return [head(l.cust.scan, x.intro), h('div', { class: 'cols' }, h('div', {}, ui.el),
+      panel(x.howT, null, h('ol', { class: 'bullets' }, x.how.map(s => h('li', { text: s })))))];
+  }
+
+  /* ---------- Envoyer au client : message prêt, ouvert dans WhatsApp, SMS, Instagram, e-mail ou le partage du téléphone ---------- */
+  function firstName(c) { const n = (c?.name || '').replace(/\s*\(.*\)$/, '').replace(/^@/, '').split(/[\s._]/)[0]; return n ? n[0].toUpperCase() + n.slice(1) : (P.lang === 'nl' ? 'klant' : 'client'); }
+  function saleMsgData(s) {
+    const b = buyer(s), p = piece(s.pieces[0]);
+    const promisedAmt = s.payments.filter(y => y.state === 'promised').reduce((t, y) => t + y.amount, 0);
+    return { name: firstName(b.c), item: p ? title(p) : '', price: money(Math.abs(s.price)), amount: promisedAmt ? money(promisedAmt) : '', ogm: ogmOf(s), iban: S.shop.iban, shop: S.shop.name,
+      date: s.delivery?.date ? E.date(s.delivery.date) : '', slot: s.delivery?.slot || '', address: s.delivery?.address ? fmtAddr(s.delivery.address) : '', no: s.no };
+  }
+  function saleKinds(s) {
+    const b = buyer(s), kinds = [s.private ? 'c2c' : b.type === 'b2b' ? 'b2b' : 'b2c'];
+    if (s.payments.some(y => y.state === 'promised')) kinds.push('deposit');
+    if (s.delivery?.mode === 'delivery' && s.delivery.date) kinds.push('delivery');
+    kinds.push('address');
+    return kinds;
+  }
+  function sendSheet(c, kinds, data, first) {
+    const l = L(), x = l.sendx;
+    sheet(x.title, () => {
+      let kind = first || kinds[0];
+      const ta = h('textarea', { class: 'input', rows: 7 });
+      const links = h('div', { class: 'send-grid' });
+      const a = (href, label, ic, blank, extra) => h('a', { href, class: 'btn big', target: blank ? '_blank' : null, rel: blank ? 'noopener noreferrer' : null, onclick: extra }, icon(ic), label);
+      const paintLinks = () => {
+        const k = E.contactLinks(c || {}, ta.value);
+        fill(links,
+          k.whatsapp ? a(k.whatsapp, 'WhatsApp', 'chat', true) : null,
+          k.sms ? a(k.sms, 'SMS', 'chat', false) : null,
+          k.instagram ? a(k.instagram, 'Instagram', 'instagram', true, () => copy(ta.value)) : null,
+          k.email ? a(k.email, 'E-mail', 'mail', false) : null,
+          navigator.share ? btn(x.share, () => navigator.share({ text: ta.value }).catch(() => {}), 'big', 'share') : null,
+          btn(l.piece.copy, () => copy(ta.value), 'big', 'copy'));
       };
-      const paste = h('textarea', { class: 'input', rows: 3, placeholder: P.lang === 'nl' ? 'Of plak hier de tekst van het gesprek' : 'Ou collez ici le texte de la conversation' });
-      return h('div', { class: 'stack' }, h('p', { class: 'muted', text: l.cust.scanHint }),
-        h('label', { class: 'dropzone', for: 'scan-in' }, icon('scan'), l.cust.scan), input,
-        paste, btn(P.lang === 'nl' ? 'Tekst analyseren' : 'Analyser le texte', () => showParsed(paste.value), 'small', 'search'), out);
+      const paint = () => { ta.value = E.message(kind, data, P.lang); paintLinks(); };
+      ta.addEventListener('input', paintLinks);
+      paint();
+      return h('div', { class: 'stack' },
+        kinds.length > 1 ? h('div', { class: 'choices cols' }, kinds.map(k => radio('kind', k, x.kinds[k], v => { kind = v; paint(); }, k === kind))) : null,
+        field(x.message, ta),
+        h('p', { class: 'hint', text: c ? x.to([c.name, c.phone, c.handle].filter(Boolean).join(' — ')) : x.noContact }),
+        links, h('p', { class: 'note', text: x.note }));
     });
   }
+  // Partager l'annonce avec sa photo : sur téléphone, Instagram, Facebook (Marketplace), WhatsApp… apparaissent dans la feuille de partage.
+  const shareFiles = new Map();  // photo prête avant le geste : Safari refuse un partage lancé trop longtemps après le toucher
+  async function prepareShare(p) {
+    if (shareFiles.has(p.id)) return;
+    shareFiles.set(p.id, null);
+    try {
+      const src = p.images?.[0] || (hasPhoto(p) ? p.photo : null);
+      if (src) { const blob = await (await fetch(src)).blob(); shareFiles.set(p.id, new File([blob], `piece-${p.no}.jpg`, { type: blob.type || 'image/jpeg' })); }
+    } catch { shareFiles.set(p.id, null); }
+  }
+  async function shareListing(p) {
+    const l = L(), text = fullListing(p, P.lang), file = shareFiles.get(p.id);
+    try {
+      if (file && navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], text }); return; }
+      if (navigator.share) { await navigator.share({ text }); return; }
+    } catch (err) { if (err?.name === 'AbortError') return; }
+    copy(text); toast(l.sendx.copiedShare);
+  }
+
   function mergeContact(c, found) {
     if (found.phones[0] && !c.phone) c.phone = found.phones[0];
     if (found.emails[0] && !c.email) c.email = found.emails[0];
@@ -1049,7 +1255,9 @@
     return [
       crumb('#/customers', l.cust.title),
       head(existing ? existing.name : l.cust.new, existing ? l.cust.since(E.date(existing.since)) : null,
-        btn(l.cust.scan, () => scanSheet(found => { mergeContact(c, found); paint(); }), 'tagged', 'scan'), btn(l.cust.save, saveIt, 'primary', 'check')),
+        btn(l.cust.scan, () => scanSheet(found => { mergeContact(c, found); paint(); }), 'tagged', 'scan'),
+        existing ? btn(l.sendx.write, () => sendSheet(existing, ['address'], { name: firstName(existing) }), '', 'chat') : null,
+        btn(l.cust.save, saveIt, 'primary', 'check')),
       c.status === 'fake' ? h('p', { class: 'alert bad' }, icon('alert'), l.cust.fakeWarn) : null,
       h('div', { class: 'cols' }, panel(null, null, form),
         panel(l.cust.sales, null, sales.length ? h('ul', { class: 'list' }, sales.map(s => { const p = piece(s.pieces[0]);
@@ -1115,6 +1323,24 @@
     S.pieces.push(p); post.imported = p.id; save(); toast(l.ig.created);
     return p;
   }
+  function importFamily(post) {
+    const l = L(), x = E.parseCaption(post.caption);
+    sheet(l.igx.family, close => {
+      let owner = '', price = x.price;
+      return h('form', { class: 'stack', onsubmit: e => {
+        e.preventDefault(); if (!owner.trim() || !(price > 0)) return;
+        const no = S.nextPrivNo++;
+        S.pieces.push({ id: `p${no}`, no, cat: guessCat(x.title), status: 'live', price, scope: 'private', owner: owner.trim(), bought: post.date, photos: 1, tone: no % 8, photo: post.photo,
+          title: { fr: x.title, nl: x.title }, dims: x.dims, state: x.state, notes: { fr: '', nl: '' }, ig: post.code, source: 'ig',
+          listings: { ig: { state: 'live', url: `https://www.instagram.com/${S.shop.instagram}/p/${post.code}/` } } });
+        post.imported = `p${no}`; save(); close(); toast(l.broc.added); go(`#/piece/p${no}`);
+      } }, h('p', { class: 'alert' }, icon('alert'), l.broc.rule),
+      h('p', { class: 'alert' }, icon('alert'), l.igx.shopWarn),
+      field(l.igx.owner, h('input', { class: 'input', placeholder: l.broc.ownerP, oninput: e => { owner = e.target.value; } })),
+      field(l.broc.price, numIn(price, v => { price = v; })),
+      h('button', { type: 'submit', class: 'btn primary big', text: l.igx.family }));
+    });
+  }
   const guessCat = t => (/sideboard|enfilade|buffet|dressoir/i.test(t) ? 'sideboard' : /armchair|fauteuil/i.test(t) ? 'armchair' : /chair|chaise|stoel/i.test(t) ? 'chair'
     : /table/i.test(t) ? 'table' : /desk|bureau/i.test(t) ? 'desk' : /sofa|canapé|zetel/i.test(t) ? 'sofa' : /lamp|lampe/i.test(t) ? 'lamp' : /mirror|miroir/i.test(t) ? 'mirror'
     : /wardrobe|armoire|nightstand|chevet|commode|chest/i.test(t) ? 'chest' : /shelf|étagère|hanger|portemanteau/i.test(t) ? 'shelf' : 'other');
@@ -1148,7 +1374,8 @@
           return h('article', { class: 'ig-post' }, h('div', { class: 'card-ph' }, photoEl({ photo: post.photo, cat: guessCat(x.title), tone: 3, photos: 1 })),
             h('div', { class: 'stack', style: 'gap:4px' }, h('b', { text: x.title }), h('span', { class: 'muted', text: [x.price ? money(x.price) : null, x.dims].filter(Boolean).join(' — ') }),
               h('span', { class: 'muted', text: E.date(post.date) })),
-            btn(l.ig.create, () => { const p = importPost(post); go(`#/add/${p.id}`); }, 'small primary', 'plus'));
+            h('div', { class: 'row' }, btn(l.ig.create, () => { const p = importPost(post); go(`#/add/${p.id}`); }, 'small primary', 'plus'),
+              btn(l.igx.family, () => importFamily(post), 'small', 'tent')));
         })) : h('p', { class: 'muted', text: l.ig.none }),
         h('details', { class: 'how' }, h('summary', { text: l.ig.howT }), h('ol', {}, l.ig.how.map(x => h('li', { text: x }))), h('p', { class: 'note', text: l.ig.fbNote }))),
       h('div', { class: 'cols' },
@@ -1260,20 +1487,20 @@
   }
 
   /* ---------- Stand brocante (famille, hors activité) ---------- */
-  function viewBrocante() {
+  function viewBrocante(q) {
     const l = L();
     const items = S.pieces.filter(isPrivate);
     const owners = [...new Set(items.map(p => p.owner))];
     const sales = S.sales.filter(s => s.private);
     const addItem = () => sheet(l.broc.add, close => {
-      const f = { owner: owners[0] || '', title: '', price: null, cat: 'other', images: [] };
+      const f = { owner: owners[0] || '', title: '', price: null, cat: 'other', images: [], listings: {} };
       const ph = h('div', {});
       const input = h('input', { type: 'file', accept: 'image/*', class: 'sr', id: 'broc-photo', onchange: async e => { const d = e.target.files[0] && await shrink(e.target.files[0], 640); if (d) { f.images = [d]; fill(ph, h('img', { class: 'scan-preview', src: d, alt: '' })); } } });
       return h('form', { class: 'stack', onsubmit: e => {
         e.preventDefault(); if (!f.owner.trim() || !f.title.trim() || !(f.price > 0)) return;
         const no = S.nextPrivNo++;
         S.pieces.push({ id: `p${no}`, no, cat: f.cat, status: 'live', price: f.price, scope: 'private', owner: f.owner.trim(), bought: TODAY, photos: f.images.length, images: f.images, tone: no % 8,
-          title: { fr: f.title, nl: f.title }, dims: '', state: 'fair', notes: { fr: '', nl: '' }, listings: {} });
+          title: { fr: f.title, nl: f.title }, dims: '', state: 'fair', notes: { fr: '', nl: '' }, listings: f.listings });
         save(); close(); render(); toast(l.broc.added);
       } }, h('p', { class: 'alert' }, icon('alert'), l.broc.rule),
       field(l.broc.owner, h('input', { class: 'input', list: 'owners', value: f.owner, placeholder: l.broc.ownerP, oninput: e => { f.owner = e.target.value; } })),
@@ -1282,8 +1509,12 @@
       h('div', { class: 'grid2' }, field(l.broc.price, numIn(null, v => { f.price = v; })),
         field(l.add.catL, h('select', { class: 'input', onchange: e => { f.cat = e.target.value; } }, Object.keys(l.cat).map(k => h('option', { value: k, selected: k === 'other', text: l.cat[k] }))))),
       h('label', { class: 'dropzone', for: 'broc-photo' }, icon('camera'), l.add.takePhoto), input, ph,
+      h('p', { class: 'lbl', text: l.famx.channels }),
+      h('div', { class: 'choices cols' }, ['ig', 'fb', 'ad2', 'vinted'].map(k => h('label', { class: 'choice' }, h('input', { type: 'checkbox', onchange: e => { if (e.target.checked) f.listings[k] = { state: 'draft' }; else delete f.listings[k]; } }),
+        h('span', { class: 'box' }), h('b', { text: chLabel(k) })))), h('p', { class: 'hint', text: l.famx.hint }),
       h('button', { type: 'submit', class: 'btn primary big', text: l.broc.add }));
     });
+    if (q?.get('add')) { history.replaceState(null, '', '#/brocante'); setTimeout(addItem, 60); }
     return [
       head(l.broc.title, l.broc.intro, btn(l.broc.add, addItem, 'tagged', 'plus')),
       h('p', { class: 'alert', style: 'margin-bottom:18px' }, icon('alert'), l.broc.rule),
@@ -1304,6 +1535,25 @@
               h('div', { class: 'sub' }, s.givenBack ? pill('live', l.broc.given) : null, btn(l.broc.deleteSale, () => cancelSale(s), 'small danger', 'trash'))); }))
             : h('p', { class: 'muted', text: '—' }), h('p', { class: 'note', text: l.broc.noInvoice }))))
     ];
+  }
+
+  /* ---------- Mode d'emploi : le parcours d'une pièce ---------- */
+  let guideTrack = 'pro';
+  function viewGuide() {
+    const l = L(), g = l.guide;
+    const track = (steps, label) => h('section', { class: 'guide-track' }, h('h2', { text: label }),
+      h('ol', { class: 'flow' }, steps.map(([t, you, app, href]) => h('li', { class: 'flow-step' },
+        h('div', { class: 'flow-head' }, h('h3', { text: t }), link(href, { class: 'btn small' }, g.open)),
+        h('dl', { class: 'flow-who' }, h('div', {}, h('dt', { text: g.you }), h('dd', { text: you })), h('div', { class: 'app' }, h('dt', { text: g.app }), h('dd', { text: app })))))));
+    const segBox = h('div', { class: 'guide-switch' });
+    const tracks = h('div', { class: 'guide-tracks' });
+    const paint = () => {
+      fill(segBox, seg([['pro', g.pro], ['fam', g.fam]], guideTrack, k => { guideTrack = k; paint(); }));
+      fill(tracks, h('div', { class: guideTrack === 'pro' ? 'on' : 'off' }, track(g.proSteps, g.pro)), h('div', { class: guideTrack === 'fam' ? 'on' : 'off' }, track(g.famSteps, g.fam)));
+    };
+    paint();
+    if (!S.guideSeen) { S.guideSeen = true; save(); }
+    return [head(g.title, g.intro), segBox, tracks];
   }
 
   /* ---------- Réglages ---------- */
@@ -1346,7 +1596,7 @@
       '': ['home', () => viewHome()], stock: ['stock', () => viewStock(q)], piece: ['stock', () => viewPiece(b)], add: ['add', () => viewAdd(b)],
       sell: ['sales', () => viewSell(b, q)], sales: ['sales', () => viewSales(q)], sale: ['sales', () => viewSale(b)], payments: ['payments', () => viewPayments(q)],
       listings: ['listings', () => viewListings()], accounting: ['accounting', () => viewAccounting()], consign: ['consign', () => viewConsign()], settings: ['settings', () => viewSettings()],
-      deliveries: ['deliveries', () => viewDeliveries()], customers: ['customers', () => viewCustomers(q)], customer: ['customers', () => viewCustomer(b)], brocante: ['brocante', () => viewBrocante()],
+      deliveries: ['deliveries', () => viewDeliveries()], customers: ['customers', () => viewCustomers(q)], customer: ['customers', () => viewCustomer(b)], brocante: ['brocante', () => viewBrocante(q)], scan: ['scan', () => viewScan()], guide: ['guide', () => viewGuide()],
     };
     const [section, view] = routes[a] || routes[''];
     const content = view();
@@ -1358,5 +1608,8 @@
     renderReason = 'update'; first = false;
   }
   window.addEventListener('hashchange', () => { renderReason = 'nav'; render(); });
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === '127.0.0.1' || location.hostname === 'localhost')) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
   render();
 })();

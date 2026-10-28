@@ -99,15 +99,38 @@
     nl: { new: 'Als nieuw', good: 'Zeer goede staat', fair: 'Goede staat, gebruikssporen', restore: 'Te restaureren' },
   };
   const LISTING = {
-    fr: (p, place) => [p.notes?.fr, `Dimensions (L × P × H) : ${p.dims}.`, `État : ${STATE.fr[p.state] || ''}.`,
-      `Retrait à ${place}, livraison possible sur devis. Paiement Bancontact, virement ou espèces.`],
-    nl: (p, place) => [p.notes?.nl, `Afmetingen (B × D × H): ${p.dims}.`, `Staat: ${STATE.nl[p.state] || ''}.`,
-      `Afhalen in ${place}, levering mogelijk op offerte. Betalen met Bancontact, overschrijving of cash.`],
+    fr: (p, place) => [p.notes?.fr, p.dims ? `Dimensions (L × P × H) : ${p.dims}.` : null, `État : ${STATE.fr[p.state] || ''}.`,
+      p.scope === 'private' ? 'Retrait à convenir.' : `Retrait à ${place}, livraison possible sur devis. Paiement Bancontact, virement ou espèces.`],
+    nl: (p, place) => [p.notes?.nl, p.dims ? `Afmetingen (B × D × H): ${p.dims}.` : null, `Staat: ${STATE.nl[p.state] || ''}.`,
+      p.scope === 'private' ? 'Afhalen in onderling overleg.' : `Afhalen in ${place}, levering mogelijk op offerte. Betalen met Bancontact, overschrijving of cash.`],
   };
 
+  // objet de la famille : l'acheteur doit savoir qu'il achète à un particulier (pas de garantie commerciale)
+  const PRIVATE = {
+    fr: 'Vente entre particuliers : objet personnel de la famille, hors boutique, sans garantie commerciale.',
+    nl: 'Verkoop tussen particulieren: persoonlijk voorwerp van de familie, buiten de winkel, zonder handelsgarantie.',
+  };
   function listingText(p, lang, place) {
     const title = `${p.title[lang] || p.title.fr} — ${String(p.price).replace('.', ',')} €`;
-    return { title, body: LISTING[lang](p, place).filter(Boolean).join('\n') };
+    const lines = LISTING[lang](p, place).filter(Boolean);
+    if (p.scope === 'private') lines.push(PRIVATE[lang]);
+    return { title, body: lines.join('\n') };
+  }
+
+  function agreedPrice(amounts, asking) {
+    const ok = amounts.filter(a => a >= asking * 0.5 && a <= asking * 1.5);
+    return ok.length ? ok[ok.length - 1] : null;
+  }
+
+  // Client déjà connu ? Même @compte, même téléphone (chiffres) ou même e-mail, sans tenir compte de la casse.
+  function matchCustomer(found, customers) {
+    const lc = s => String(s || '').trim().toLowerCase();
+    const digits = s => String(s || '').replace(/\D/g, '').replace(/^0032/, '').replace(/^32/, '').replace(/^0/, '');
+    const hit = customers.find(c =>
+      (c.handle && found.handles.some(x => lc(x) === lc(c.handle))) ||
+      (c.phone && found.phones.some(x => digits(x) === digits(c.phone))) ||
+      (c.email && found.emails.some(x => lc(x) === lc(c.email))));
+    return hit ? hit.id : null;
   }
 
   const MENTION = {
@@ -223,22 +246,79 @@ ${lines.map(l => `  <cac:InvoiceLine><cbc:ID>${l.n}</cbc:ID><cbc:InvoicedQuantit
   const anyCase = w => `[${w[0].toUpperCase()}${w[0]}]${w.slice(1)}`;
   const FR_ST = String.raw`(?:${['rue', 'avenue', 'av\.', 'chaussée', 'boulevard', 'bd', 'place', 'quai', 'drève', 'clos', 'square', 'allée', 'impasse', 'chemin'].map(anyCase).join('|')})(?:\s+[A-Za-zÀ-ÿ'’.-]+){1,5}?`;
   const NL_ST = "[A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]*(?:straat|laan|lei|steenweg|plein|weg|dreef|kaai|vest)";
-  const ADDRESS = new RegExp(String.raw`((?:${FR_ST}|${NL_ST})\s+\d{1,4}[a-zA-Z]?(?:\s*(?:bte|bus|boîte)\s*\w+)?)\s*,?\s*(\d{4})\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+(?:[ -][A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+)*)`, 'g');
+  const ADDRESS = new RegExp(String.raw`((?:${FR_ST}|${NL_ST})\s+\d{1,4}[a-zA-Z]?(?:\s*(?:bte|bus|boîte)\s*\w+)?)\s*[,\-–—]?\s*(\d{4})\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+(?:[ -][A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]+)*)`, 'g');
   function parseContact(text) {
     const t = String(text || '');
     const uniq = a => [...new Set(a)];
     const emails = uniq(t.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || []);
-    const handles = uniq((t.match(/(?:^|[\s(])@[A-Za-z0-9._]{3,30}/g) || []).map(s => s.trim().replace(/^\(/, '').replace(/\.$/, '')));
-    const phones = uniq((t.match(/(?:\+32|0032|\b0)\s?4\d{2}(?:[\s./-]?\d{2}){3}\b/g) || []).map(p => {
-      const d = p.replace(/\D/g, '').replace(/^0032/, '').replace(/^32/, '').replace(/^0/, '');
-      return `+32 ${d.slice(0, 3)} ${d.slice(3, 5)} ${d.slice(5, 7)} ${d.slice(7, 9)}`;
-    }));
+    // l, I et 1 se confondent à la lecture : deux variantes du même @compte n'en font qu'un (la première lue est gardée)
+    const lookalike = s => s.toLowerCase().replace(/[i1|]/g, 'l');
+    const handles = (t.match(/(?:^|[\s(])@[A-Za-z0-9._]{3,30}/g) || []).map(s => s.trim().replace(/^\(/, '').replace(/\.$/, ''))
+      .filter((x, i, all) => all.findIndex(y => lookalike(y) === lookalike(x)) === i);
+    // GSM (04xx xx xx xx) et fixes (02 xxx xx xx, 010 xx xx xx…) : on garde le numéro national et on le remet au format belge
+    // GSM et fixes belges (séparateurs espace . - /, « (0) » après +32) ; un numéro d'entreprise (BCE, TVA, KBO, groupé 4.3.3) n'est pas un téléphone
+    const phoneRe = /(?:\+32\s?(?:\(0\)\s?)?|0032\s?|\b0)\d{1,3}(?:[\s./-]?\d{2,3}){2,4}\b/g;
+    const phones = uniq([...t.matchAll(phoneRe)].filter(m => !/(?:BE|BCE|KBO|TVA|BTW|VAT)[\s:.]*$/i.test(t.slice(Math.max(0, m.index - 8), m.index))
+      && !/^0\d{3}[.\s]\d{3}[.\s]\d{3}$/.test(m[0])).map(m => {
+      const d = m[0].replace(/\(0\)/, '').replace(/\D/g, '').replace(/^0032/, '').replace(/^32/, '').replace(/^0/, '');
+      if (d.length === 9 && d[0] === '4') return `+32 ${d.slice(0, 3)} ${d.slice(3, 5)} ${d.slice(5, 7)} ${d.slice(7, 9)}`;
+      if (d.length === 8 && '2349'.includes(d[0])) return `+32 ${d[0]} ${d.slice(1, 4)} ${d.slice(4, 6)} ${d.slice(6, 8)}`;
+      if (d.length === 8) return `+32 ${d.slice(0, 2)} ${d.slice(2, 4)} ${d.slice(4, 6)} ${d.slice(6, 8)}`;
+      return null;
+    }).filter(Boolean));
     const addresses = [...t.matchAll(ADDRESS)].map(m => ({ street: m[1].replace(/\s+/g, ' ').trim(), zip: m[2], city: m[3] }));
     const amounts = uniq([...t.matchAll(/(\d{1,3}(?:[ .\u00a0]\d{3})+|\d+)(?:,(\d{1,2}))?\s?(?:€|EUR\b|euros?\b)/gi)]
       .map(m => Number(m[1].replace(/\D/g, '') + (m[2] ? `.${m[2]}` : ''))));
-    return { phones, emails, handles, addresses, amounts };
+    // prix convenu : dernier montant qui suit une formule d'accord (FR, NL, EN)
+    const deals = [...t.matchAll(/(?:\bok\b|\bokay\b|d['’]accord|\bdeal\b|akkoord|\bparfait\b|\bc['’]est bon\b)\s*(?:pour|voor|for|à|aan)?\s*(\d{1,3}(?:[ . ]\d{3})+|\d+)(?:,(\d{1,2}))?\s?(?:€|eur\b|euros?\b)/gi)]
+      .filter(m => !/\b(?:pas|niet|not|no)\s*$/i.test(t.slice(Math.max(0, m.index - 8), m.index)));  // « pas ok pour… » n'est pas un accord
+    const last = deals[deals.length - 1];
+    const agreed = last ? Number(last[1].replace(/\D/g, '') + (last[2] ? `.${last[2]}` : '')) : null;
+    return { phones, emails, handles, addresses, amounts, agreed };
   }
 
-  return { CASH_LIMIT, MENTION, round2, marginVat, regimeOf, consignment, saleTax, quarterOf, quarterGrids, cashCheck, missingFields,
+  /* ---------- Écrire au client depuis le téléphone ---------- */
+  // Liens d'ouverture : le texte est encodé, rien n'est envoyé sans que l'utilisateur appuie sur « Envoyer » dans l'app choisie.
+  function contactLinks(c, text) {
+    const enc = encodeURIComponent(String(text || ''));
+    let d = String(c.phone || '').replace(/\D/g, '').replace(/^00/, '');
+    if (d.startsWith('0')) d = `32${d.slice(1)}`;
+    const phoneOk = /^\d{9,15}$/.test(d);
+    const handle = String(c.handle || '').replace(/^@/, '');
+    const handleOk = /^[A-Za-z0-9._]{1,30}$/.test(handle);
+    const emailOk = /^[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(String(c.email || ''));  // rien qui puisse ajouter un destinataire caché
+    return {
+      whatsapp: phoneOk ? `https://wa.me/${d}?text=${enc}` : null,
+      sms: phoneOk ? `sms:+${d}?&body=${enc}` : null,  // « ?&body= » est compris par Android et par iOS
+      instagram: handleOk ? `https://ig.me/m/${handle}` : null,  // Instagram ne pré-remplit pas le message : il est copié avant
+      email: emailOk ? `mailto:${c.email}?body=${enc}` : null,
+    };
+  }
+  // Messages prêts : un champ manquant ne laisse jamais de trou (« le  entre  au »), la phrase concernée disparaît.
+  const MESSAGES = {
+    fr: {
+      b2c: d => `Bonjour ${d.name}, merci pour votre achat : ${d.item}, ${d.price}.\nPaiement par virement : ${d.iban}, communication ${d.ogm}.${d.date && d.address ? `\nLivraison le ${d.date}${d.slot ? ` ${d.slot}` : ''} au ${d.address}.` : ''}\n${d.shop}`,
+      b2b: d => `Bonjour, la facture ${d.no} (${d.item}, ${d.price}) vous est envoyée par Peppol. Paiement à 30 jours, communication ${d.ogm}. Merci ! ${d.shop}`,
+      c2c: d => `Bonjour ${d.name}, c'est d'accord pour ${d.item} à ${d.price}. Retrait à convenir. Vente entre particuliers.`,
+      deposit: d => `Bonjour ${d.name}, pour réserver ${d.item}, un acompte de ${d.amount || d.price} suffit : virement ${d.iban}, communication ${d.ogm}. ${d.shop}`,
+      delivery: d => `Bonjour ${d.name}, la livraison de ${d.item} est prévue${d.date ? ` le ${d.date}` : ''}${d.slot ? ` entre ${d.slot}` : ''}${d.address ? ` au ${d.address}` : ''}. Pouvez-vous confirmer ? ${d.shop}`,
+      address: d => `Bonjour ${d.name}, pouvez-vous m'envoyer votre adresse complète (rue, numéro, code postal, commune) et un numéro de téléphone pour la livraison ? Merci !`,
+    },
+    nl: {
+      b2c: d => `Dag ${d.name}, bedankt voor uw aankoop: ${d.item}, ${d.price}.\nBetaling per overschrijving: ${d.iban}, mededeling ${d.ogm}.${d.date && d.address ? `\nLevering op ${d.date}${d.slot ? ` ${d.slot}` : ''} op ${d.address}.` : ''}\n${d.shop}`,
+      b2b: d => `Dag, factuur ${d.no} (${d.item}, ${d.price}) wordt u via Peppol bezorgd. Betaling binnen 30 dagen, mededeling ${d.ogm}. Bedankt! ${d.shop}`,
+      c2c: d => `Dag ${d.name}, akkoord voor ${d.item} aan ${d.price}. Afhalen in onderling overleg. Verkoop tussen particulieren.`,
+      deposit: d => `Dag ${d.name}, om ${d.item} te reserveren volstaat een voorschot van ${d.amount || d.price}: overschrijving ${d.iban}, mededeling ${d.ogm}. ${d.shop}`,
+      delivery: d => `Dag ${d.name}, de levering van ${d.item} is gepland${d.date ? ` op ${d.date}` : ''}${d.slot ? ` tussen ${d.slot}` : ''}${d.address ? ` op ${d.address}` : ''}. Kunt u bevestigen? ${d.shop}`,
+      address: d => `Dag ${d.name}, kunt u mij uw volledige adres (straat, nummer, postcode, gemeente) en een telefoonnummer voor de levering sturen? Bedankt!`,
+    },
+  };
+  const MSG_FIELDS = ['name', 'item', 'price', 'amount', 'ogm', 'iban', 'shop', 'date', 'slot', 'address', 'no'];
+  const message = (kind, d, lang) => {
+    const safe = Object.fromEntries(MSG_FIELDS.map(k => [k, d?.[k] == null ? '' : String(d[k]).trim()]));
+    return (MESSAGES[lang] || MESSAGES.fr)[kind](safe).replace(/[ \t]{2,}/g, ' ').replace(/ +([.,!?])/g, '$1').trim();
+  };
+
+  return { CASH_LIMIT, MENTION, PRIVATE, matchCustomer, agreedPrice, contactLinks, message, round2, marginVat, regimeOf, consignment, saleTax, quarterOf, quarterGrids, cashCheck, missingFields,
     structuredComm, validBce, paidAmount, promisedAmount, parseCaption, parseContact, money, date, listingText, peppolUbl, matchPayment, STATE };
 });

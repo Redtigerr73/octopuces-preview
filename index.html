@@ -6,10 +6,14 @@
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark light">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/ https://cdn.jsdelivr.net/npm/tesseract.js@v5.1.1/ https://cdn.jsdelivr.net/npm/tesseract.js-core@v5.1.1/ 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' data: https://cdn.jsdelivr.net https://tessdata.projectnaptha.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/ https://cdn.jsdelivr.net/npm/tesseract.js@v5.1.1/ https://cdn.jsdelivr.net/npm/tesseract.js-core@v5.1.1/ 'wasm-unsafe-eval'; worker-src 'self' blob:; frame-src https://www.instagram.com; connect-src 'self' data: https://cdn.jsdelivr.net https://tessdata.projectnaptha.com; object-src 'none'; base-uri 'none'; form-action 'self'">
   <title>Etiket — OctoPuces (démo)</title>
   <link rel="preload" href="assets/fonts/archivo-wdth.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <meta name="theme-color" content="#172126">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="assets/app.css">
   <script src="assets/theme.js"></script>
 </head>
@@ -20,6 +24,7 @@
   <script src="assets/data.js"></script>
   <script src="assets/i18n.js"></script>
   <script src="assets/i18n-octo.js"></script>
+  <script src="assets/i18n-guide.js"></script>
   <script src="assets/icons.js"></script>
   <script src="assets/app.js"></script>
 </body>

@@ -2,7 +2,7 @@
    Pièces : publications Instagram réelles (titre, prix, dimensions). Prix d'achat, clients, ventes et paiements : FICTIFS. */
 window.SEED = {
   // photos présentes dans assets/photos/ : ajoutez les noms ici quand vous déposez d'autres photos (octo-02.jpg … octo-12.jpg)
-  photosAvailable: ['assets/photos/octo-01.jpg'],
+  photosAvailable: ['assets/photos/octo-01.jpg', 'assets/photos/octo-02.jpg'],
   login: { email: 'demo@octopuces.test', password: 'Octo-demo-2026' },
   shop: { name: 'OctoPuces', legal: 'Linthout Arnaud', owner: 'Arnaud', vat: 'BE0844147250', peppol: '0208:0844147250', peppolSince: '2026-04-01',
     address: { street: 'Avenue des Azalées 66 bte ETRC', zip: '1030', city: 'Schaerbeek' }, city: { fr: 'Schaerbeek', nl: 'Schaarbeek' },

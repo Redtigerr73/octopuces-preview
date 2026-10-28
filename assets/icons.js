@@ -48,5 +48,8 @@ window.ICONS = {
     instagram: 'M4 4h16v16H4zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM17 7h.01',
     scan: 'M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M7 12h10',
     edit: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
+    mail: 'M3 6h18v12H3zM3 7l9 6 9-6',
+    share: 'M12 3v12M7 8l5-5 5 5M5 13v7h14v-7',
+    guide: 'M4 5c3-1 6-1 8 1 2-2 5-2 8-1v14c-3-1-6-1-8 1-2-2-5-2-8-1zM12 6v14',
   },
 };

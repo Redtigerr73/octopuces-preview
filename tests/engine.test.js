@@ -168,3 +168,105 @@ test('only validated payments count; a promised deposit does not reduce the bala
   assert.equal(E.paidAmount(pays), 80);
   assert.equal(E.promisedAmount(pays), 100);
 });
+
+test('a family item listing says it is a private sale, a shop listing does not', () => {
+  const base = { title: { fr: 'Vélo d’enfant', nl: 'Kinderfiets' }, dims: '', price: 40, state: 'fair', notes: {} };
+  assert.match(E.listingText({ ...base, scope: 'private' }, 'fr', 'Schaerbeek').body, /Vente entre particuliers/);
+  assert.match(E.listingText({ ...base, scope: 'private' }, 'nl', 'Schaarbeek').body, /Verkoop tussen particulieren/);
+  assert.doesNotMatch(E.listingText(base, 'fr', 'Schaerbeek').body, /particuliers/);
+});
+
+test('a scanned conversation is linked to a known customer by handle, phone or e-mail', () => {
+  const customers = [
+    { id: 'c1', handle: '@demo_sophie', phone: '+32 470 00 00 11', email: 'sophie@demo.test' },
+    { id: 'c2', handle: '', phone: '+32 470 00 00 44', email: '' },
+  ];
+  assert.equal(E.matchCustomer({ handles: ['@Demo_Sophie'], phones: [], emails: [] }, customers), 'c1');
+  assert.equal(E.matchCustomer({ handles: [], phones: ['+32 470 00 00 44'], emails: [] }, customers), 'c2');
+  assert.equal(E.matchCustomer({ handles: [], phones: [], emails: ['SOPHIE@demo.test'] }, customers), 'c1');
+  assert.equal(E.matchCustomer({ handles: ['@inconnu'], phones: [], emails: [] }, customers), null);
+});
+
+test('the agreed price is the last amount close to the asking price, never a delivery fee', () => {
+  assert.equal(E.agreedPrice([450, 400], 480), 400);
+  assert.equal(E.agreedPrice([40, 450], 480), 450);
+  assert.equal(E.agreedPrice([40], 480), null);
+  assert.equal(E.agreedPrice([], 480), null);
+});
+
+test('phones match whatever the format (+32, 0032, 0)', () => {
+  const customers = [{ id: 'c9', handle: '', phone: '0470 00 00 99', email: '' }];
+  assert.equal(E.matchCustomer({ handles: [], phones: ['+32 470 00 00 99'], emails: [] }, customers), 'c9');
+  assert.equal(E.matchCustomer({ handles: [], phones: ['0032470000099'], emails: [] }, customers), 'c9');
+});
+
+test('a family listing has no empty size line and no shop delivery terms', () => {
+  const body = E.listingText({ title: { fr: 'Vélo d’enfant' }, dims: '', price: 40, state: 'fair', notes: {}, scope: 'private' }, 'fr', 'Schaerbeek').body;
+  assert.doesNotMatch(body, /Dimensions/);
+  assert.doesNotMatch(body, /livraison possible sur devis/);
+  assert.match(body, /Retrait à convenir/);
+});
+
+test('landlines and addresses written with a dash are recognised too', () => {
+  const c = E.parseContact('L’Andalou — Rue du Marché au Charbon 45 - 1000 Bruxelles\nRéservations : 02 512 34 56 / +32 2 512 34 57\ninfo@restaurant.test');
+  assert.deepEqual(c.addresses, [{ street: 'Rue du Marché au Charbon 45', zip: '1000', city: 'Bruxelles' }]);
+  assert.deepEqual(c.phones, ['+32 2 512 34 56', '+32 2 512 34 57']);
+  assert.deepEqual(c.emails, ['info@restaurant.test']);
+  assert.deepEqual(E.parseContact('Ma rue : Avenue Louise 54 – 1050 Ixelles').addresses, [{ street: 'Avenue Louise 54', zip: '1050', city: 'Ixelles' }]);
+  assert.deepEqual(E.parseContact('fixe 03 123 45 67').phones, ['+32 3 123 45 67']);
+});
+
+test('the agreed price comes from "ok pour", "d’accord", "deal" or "akkoord" first', () => {
+  assert.equal(E.parseContact('Oui ! 750 € livraison incluse\nOk pour 700€ ?\nOk pour 700 €').agreed, 700);
+  assert.equal(E.parseContact('Je propose 600 € ? Akkoord voor 650 euro').agreed, 650);
+  assert.equal(E.parseContact('Il est à combien ? 450 €').agreed, null);
+});
+
+test('OCR look-alikes (l, I, 1) do not create two handles for the same person', () => {
+  assert.deepEqual(E.parseContact('@sophie.d_bxl\n@sophie.d_bxI').handles, ['@sophie.d_bxl']);
+});
+
+test('contact links open WhatsApp, SMS, Instagram and e-mail with the message encoded', () => {
+  const l = E.contactLinks({ phone: '+32 470 00 00 11', handle: '@demo_sophie', email: 'sophie@demo.test' }, 'Bonjour & merci ? 450 €');
+  assert.equal(l.whatsapp, 'https://wa.me/32470000011?text=Bonjour%20%26%20merci%20%3F%20450%20%E2%82%AC');
+  assert.equal(l.sms, 'sms:+32470000011?&body=Bonjour%20%26%20merci%20%3F%20450%20%E2%82%AC');
+  assert.equal(l.instagram, 'https://ig.me/m/demo_sophie');
+  assert.equal(l.email, 'mailto:sophie@demo.test?body=Bonjour%20%26%20merci%20%3F%20450%20%E2%82%AC');
+  const none = E.contactLinks({ phone: '', handle: '@x y', email: 'pas-un-mail' }, 'x');
+  assert.deepEqual([none.whatsapp, none.sms, none.instagram, none.email], [null, null, null, null]);
+  assert.equal(E.contactLinks({ phone: '0470 00 00 11' }, 'x').whatsapp, 'https://wa.me/32470000011?text=x');
+});
+
+test('ready-made messages fit the situation: B2C, B2B, family (C2C), delivery, address', () => {
+  const d = { name: 'Sophie', item: 'Armoire vintage', price: '750,00 €', ogm: '+++202/6000/06054+++', iban: 'BE00 0000 0000 0000', shop: 'OctoPuces',
+    date: '31/10/2026', slot: '18:00–20:00', address: 'Rue de la Victoire 12, 1060 Saint-Gilles', no: 'F-2026-0060' };
+  assert.match(E.message('b2c', d, 'fr'), /Bonjour Sophie.*Armoire vintage.*750,00 €.*\+\+\+202\/6000\/06054\+\+\+/s);
+  assert.match(E.message('b2b', d, 'fr'), /F-2026-0060.*Peppol/s);
+  const c2c = E.message('c2c', d, 'fr');
+  assert.match(c2c, /entre particuliers/);
+  assert.doesNotMatch(c2c, /OctoPuces|\+\+\+/);
+  assert.match(E.message('delivery', d, 'nl'), /31\/10\/2026.*18:00–20:00.*Rue de la Victoire/s);
+  assert.match(E.message('address', d, 'fr'), /adresse complète/);
+});
+
+test('company numbers are not phones; Belgian formats with slash, (0) or 2-digit groups are', () => {
+  assert.deepEqual(E.parseContact('BCE 0412.345.678 — TVA BE 0403 170 701').phones, []);
+  assert.deepEqual(E.parseContact('0470/12 34 56').phones, ['+32 470 12 34 56']);
+  assert.deepEqual(E.parseContact('0470/12.34.56').phones, ['+32 470 12 34 56']);
+  assert.deepEqual(E.parseContact('02/123.45.67').phones, ['+32 2 123 45 67']);
+  assert.deepEqual(E.parseContact('+32 (0)470 12 34 56').phones, ['+32 470 12 34 56']);
+  assert.deepEqual(E.parseContact('04 70 12 34 56').phones, ['+32 470 12 34 56']);
+});
+
+test('a refused offer is not an agreed price', () => {
+  assert.equal(E.parseContact('Pas ok pour 200 €, mon prix c’est 250 €').agreed, null);
+  assert.equal(E.parseContact('Niet akkoord voor 200 euro').agreed, null);
+});
+
+test('e-mail links refuse hidden recipients; messages have no empty gaps', () => {
+  assert.equal(E.contactLinks({ email: 'a@b.com?bcc=x%40evil.org&z=.be' }, 'x').email, null);
+  assert.equal(E.contactLinks({ email: 'a@b.com%0Abcc:x@y.be' }, 'x').email, null);
+  const m = E.message('b2c', { name: 'Sophie', item: 'Armoire', price: '750,00 €', ogm: '+++1+++', iban: 'BE00', shop: 'OctoPuces' }, 'fr');
+  assert.doesNotMatch(m, /undefined|Livraison le|  /);
+  assert.doesNotMatch(E.message('delivery', { name: 'Sophie', item: 'Armoire' }, 'fr'), /undefined|le  |entre  /);
+});
