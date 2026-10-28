@@ -17,7 +17,8 @@
   const clone = o => JSON.parse(JSON.stringify(o));
   const fresh = () => Object.assign(clone(window.SEED), { timings: [], nextNo: 112, nextPrivNo: 203, counters: { F: 66, B: 2, NC: 1 } });
   let S = store.get(KEY, null) || fresh();
-  const P = Object.assign({ lang: 'fr', theme: 'entrepot' }, store.get(PREFS, {}));
+  for (const post of S.igPosts || []) if (window.SEED.igPosts.find(x => x.code === post.code)?.gone) post.gone = true;
+  const P = Object.assign({ lang: 'fr', theme: 'entrepot', guide: true, costs: false }, store.get(PREFS, {}));  // guide et costs : propres à cet appareil
   let storageWarned = false;
   const save = () => { if (!store.set(KEY, S) && !storageWarned) { storageWarned = true; toast(P.lang === 'nl' ? 'Opslag niet beschikbaar of vol: wijzigingen blijven niet bewaard.' : 'Stockage indisponible ou plein : les changements ne seront pas conservés.'); } };
   const savePrefs = () => store.set(PREFS, P);
@@ -104,6 +105,9 @@
     return kind === 'F' ? { id: `s${n}`, no: `F-2026-${pad4(n)}` } : kind === 'B' ? { id: `b${n}`, no: `B-${pad4(n)}` } : { id: `nc${n}`, no: `NC-2026-${pad4(n)}` };
   }
   const fmtAddr = a => (a ? `${a.street}, ${a.zip} ${a.city}`.replace(/^, /, '') : '—');
+  const addrKey = a => fmtAddr(a).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const sameAddr = (a, b) => addrKey(a) === addrKey(b);
+  const fullAddr = a => !!(a && a.street && /^\d{4}$/.test(String(a.zip).trim()) && a.city);
   const inFreeZone = a => !!a && /^1\d{3}$/.test(a.zip);  // codes postaux 1000–1999 : Bruxelles et Brabant (zone indicative de la démo)
 
   /* ---------- Briques d'interface ---------- */
@@ -130,8 +134,23 @@
     fill(fig, h('div', { class: 'card-ph' }, photoEl(p)), h('div', { class: 'ig-consent' }, btn(L().igx.load, load, 'small', 'instagram'), h('p', { class: 'note', text: L().igx.loadNote })));
     return fig;
   }
-  const tagEl = (p, big) => h('div', { class: `${big ? 'tag big' : 'tag'}${isPrivate(p) ? ' private' : ''}` }, h('span', { class: 'no', text: String(p.no) }),
-    p.price ? h('span', { class: 'price', text: money(p.price).replace(',00', '') }) : null);
+  // Lien vers Instagram, toujours présent : la publication si on la connaît, sinon le profil de la boutique
+  const igProfile = () => `https://www.instagram.com/${S.shop.instagram}/`;
+  // publication connue par son code (ou par la publication reçue) ; retirée d'Instagram (gone) : le profil
+  const igPostUrl = c => { const code = typeof c === 'object' ? (c.gone ? '' : c.code) : c; return /^[A-Za-z0-9_-]{5,20}$/.test(code || '') ? `https://www.instagram.com/p/${code}/` : igProfile(); };
+  const igHref = p => safeUrl(p.listings?.ig?.url || '', 'ig') || (p.ig ? igPostUrl(p.ig) : igProfile());
+  const igLink = (href, text) => h('a', { href, target: '_blank', rel: 'noopener noreferrer', class: 'ig-link' }, icon('instagram'), h('span', { text }), icon('external'));
+  const tagEl = (p, big) => {
+    const l = L(), cost = P.costs && !isPrivate(p) && p.purchase != null;
+    return h('div', { class: `${big ? 'tag big' : 'tag'}${isPrivate(p) ? ' private' : ''}${cost ? ' with-cost' : ''}` },
+      h('span', { class: 'no' }, h('small', { text: 'N°' }), String(p.no)),
+      p.price ? h('span', { class: 'price' }, h('small', { text: l.costs.sale }), money(p.price).replace(',00', '')) : null,
+      cost ? h('span', { class: 'cost no-print', title: l.costs.only }, icon('eye'), `${l.costs.buy} ${money(p.purchase).replace(',00', '')}`,
+        p.price ? h('b', { text: `${l.costs.margin} ${p.price - p.purchase >= 0 ? '+' : ''}${money(p.price - p.purchase).replace(',00', '')}` }) : null) : null);
+  };
+  // vue propriétaire : prix d'achat et marge sur les étiquettes, mémorisé sur cet appareil seulement
+  const costToggle = () => btn(P.costs ? L().costs.hide : L().costs.show, () => { P.costs = !P.costs; savePrefs(); render(); toast(P.costs ? L().costs.shown : L().costs.hidden); },
+    `cost-toggle${P.costs ? ' on' : ''}`, 'eye');
   const pill = (state, text) => h('span', { class: `pill ${state}`, text });
   function cardEl(p) {
     const miss = p.status === 'draft' ? missingOf(p) : [];
@@ -209,7 +228,10 @@
     const err = h('p', { class: 'alert bad', hidden: true, role: 'alert' }, icon('alert'), l.login.bad);
     const submit = e => {
       e.preventDefault();
-      if (email.value.trim().toLowerCase() === S.login.email && pass.value === S.login.password) { session.set(true); location.hash = '#/'; render(); }
+      if (email.value.trim().toLowerCase() === S.login.email && pass.value === S.login.password) {
+        session.set(true); location.hash = '#/'; render();
+        maybeStartGuide(450);
+      }
       else { err.hidden = false; pass.focus(); }
     };
     const langBtn = h('div', { class: 'lang', role: 'group', 'aria-label': 'Langue / Taal' },
@@ -249,7 +271,8 @@
     const search = h('form', { class: 'searchbox', role: 'search', onsubmit: e => { e.preventDefault(); go(`#/stock?q=${encodeURIComponent(e.target.q.value)}`); } },
       icon('search'), h('input', { name: 'q', type: 'search', placeholder: l.search, 'aria-label': l.search }));
     const top = h('header', { class: 'top' }, brand(), search, h('span', { class: 'grow' }),
-      link('#/stock?focus=1', { class: 'icon-btn search-btn', 'aria-label': l.search }, icon('search')), langBtn);
+      link('#/stock?focus=1', { class: 'icon-btn search-btn', 'aria-label': l.search }, icon('search')),
+      P.guide ? h('button', { type: 'button', class: 'guide-top no-print', 'aria-label': l.full.fab, onclick: () => startTour('page') }, icon('guide'), h('span', { text: l.full.fabShort })) : null, langBtn);
     const MOBILE = ['home', 'stock', 'add', 'sales', 'scan'];
     const more = () => sheet(l.nav.more, h('nav', { class: 'menu' }, NAV.filter(([k]) => !MOBILE.includes(k)).map(([k, href, ic]) =>
       link(href, { onclick: () => document.querySelector('dialog')?.close() }, icon(ic), l.nav[k], c[k] ? h('span', { class: 'count', text: String(c[k]) }) : null))));
@@ -262,7 +285,8 @@
       link('#/sales', { 'aria-current': cur('sales') }, icon('sales'), h('span', { text: l.nav.sales })),
       h('button', { type: 'button', 'aria-current': MOBILE.includes(section) ? null : 'page', onclick: more }, icon('more'), h('span', { text: l.nav.more }),
         Object.entries(c).some(([k, v]) => v && !MOBILE.includes(k)) ? h('span', { class: 'dot', 'aria-hidden': 'true' }) : null));
-    return h('div', { class: 'shell' }, side, h('div', { class: 'col' }, top, h('p', { class: 'demo-banner', text: l.demoBanner }), h('main', { id: 'main' }, content)), bottom);
+    const fab = P.guide ? h('button', { type: 'button', class: 'guide-fab no-print', onclick: () => startTour('page') }, icon('guide'), h('span', { text: l.full.fab })) : null;
+    return h('div', { class: `shell${P.guide ? ' has-guide' : ''}` }, side, h('div', { class: 'col' }, top, h('p', { class: 'demo-banner', text: l.demoBanner }), h('main', { id: 'main' }, content)), bottom, fab);
   }
 
   /* ---------- Accueil ---------- */
@@ -297,7 +321,7 @@
     return [
       head(l.hello(S.shop.owner), todayText, link('#/add', { class: 'btn tagged big' }, icon('plus'), l.nav.add)),
       S.guideSeen ? null : h('div', { class: 'guide-banner' }, icon('guide'), h('span', { text: l.guide.banner }),
-        h('span', { class: 'row' }, link('#/guide', { class: 'btn small primary' }, l.guide.see), btn(l.guide.hide, () => { S.guideSeen = true; save(); render(); }, 'small'))),
+        h('span', { class: 'row' }, btn(l.tour.launch, () => startTour('full', 0), 'small primary', 'guide'), link('#/guide', { class: 'btn small' }, l.guide.see), btn(l.guide.hide, () => { S.guideSeen = true; save(); render(); }, 'small'))),
       h('div', { class: 'figures' },
         h('div', { class: 'fig' }, h('span', { class: 'lbl', text: l.kSales }), h('b', { text: money(monthSales.reduce((x, s) => x + s.price, 0)) }), h('span', { text: l.kSalesN(monthSales.length) })),
         h('div', { class: 'fig' }, h('span', { class: 'lbl', text: l.kCashed }), h('b', { text: money(cashed) }), h('span', { text: P.lang === 'nl' ? 'Mollie, bank, kassa' : 'Mollie, banque, caisse' })),
@@ -324,7 +348,7 @@
     const searchIn = h('input', { class: 'input', type: 'search', placeholder: l.search, 'aria-label': l.search, value: q.get('q') || '', onchange: e => nav('q', e.target.value) });
     if (q.get('focus')) setTimeout(() => searchIn.focus(), 0);
     return [
-      head(l.nav.stock, `${S.pieces.filter(p => !isPrivate(p)).length} ${P.lang === 'nl' ? 'stukken' : 'pièces'}`, link('#/add', { class: 'btn tagged' }, icon('plus'), l.nav.add)),
+      head(l.nav.stock, `${S.pieces.filter(p => !isPrivate(p)).length} ${P.lang === 'nl' ? 'stukken' : 'pièces'}`, costToggle(), link('#/add', { class: 'btn tagged' }, icon('plus'), l.nav.add)),
       h('div', { class: 'row toolbar' }, h('div', { style: 'flex:1;min-width:200px' }, searchIn),
         h('label', { class: 'row' }, h('span', { class: 'sr', text: l.sort }),
           h('select', { class: 'input', style: 'width:auto', onchange: e => nav('s', e.target.value) },
@@ -344,7 +368,8 @@
       const st = lst?.state || 'none';
       let acts = [];
       if (ch === 'site') acts = st === 'none' ? [] : [h('span', { class: 'muted', text: l.lstSite })];
-      else if (ch === 'ig' && !isPrivate(p) && (st === 'none' || st === 'draft')) acts = [btn(l.ig.publish, () => { p.listings.ig = { state: 'live', url: `https://www.instagram.com/${S.shop.instagram}/` }; save(); render(); toast(l.ig.published); }, 'small primary', 'instagram')];
+      else if (ch === 'ig' && !isPrivate(p) && (st === 'none' || st === 'draft')) acts = [btn(l.ig.publish, () => { p.listings.ig = { state: 'live', url: `https://www.instagram.com/${S.shop.instagram}/` }; save(); render(); toast(l.ig.published); }, 'small primary', 'instagram'),
+        igLink(igProfile(), l.igx.seeProfile(S.shop.instagram))];
       else if (st === 'none' || st === 'draft') acts = [btn(l.piece.copy, () => copy(fullListing(p, P.lang)), 'small', 'copy'), ext(createUrl(ch), l.lstOpen), btn(l.lstDone, () => published(p, ch), 'small primary', 'check')];
       else if (st === 'live' && lst.url) acts = [ext(lst.url, ch === 'ig' ? l.ig.open : l.lstSeen)];
       else if (st === 'to-remove') acts = [lst.url ? ext(lst.url, l.lstSeen) : null, btn(l.lstRemoved, () => { lst.state = 'removed'; save(); render(); toast(l.lstRemoved); }, 'small primary', 'check')];
@@ -455,7 +480,7 @@
     clearInterval(chronoTimer);
     chronoTimer = setInterval(() => {
       if (!location.hash.startsWith(`#/add/${p.id}`)) { clearInterval(chronoTimer); return; }
-      if (document.visibilityState === 'visible') { p.entryMs += 1000; chrono.lastChild.textContent = fmt(p.entryMs); if (p.entryMs % 5000 === 0) save(); }
+      if (document.visibilityState === 'visible' && !tour) { p.entryMs += 1000; chrono.lastChild.textContent = fmt(p.entryMs); if (p.entryMs % 5000 === 0) save(); }
     }, 1000);
     const preview = h('div', {});
     const touch = () => { save(); saved.textContent = l.add.saved(nowTime()); fill(preview, cardEl(p)); updateNav(); };
@@ -621,7 +646,7 @@
     const isB2b = () => !priv && (cust()?.vat || (f.newCustomer && f.newVat));
     const problem = () => {
       if (isB2b() && !E.validBce(cust()?.vat || f.newVat)) return l.sell.badVat;
-      if (f.mode === 'delivery' && !(f.address.street && f.address.zip && f.address.city)) return l.deliv.address;
+      if (f.mode === 'delivery' && !fullAddr(f.address)) return l.delivx.incomplete;
       if (linked) return null;
       if (!(f.amount > 0 && f.amount <= f.price)) return l.sell.badAmount;
       if (f.method === 'cash' && !E.cashCheck(f.amount).ok) return l.sell.cashBlocked;
@@ -664,7 +689,7 @@
       if (known) { f.customer = known; f.newCustomer = false; }
       else {
         f.customer = null; f.newCustomer = true;
-        f.newHandle = found.handles[0] || f.newHandle; f.newName = f.newName || found.handles[0] || '';
+        f.newHandle = found.handles[0] || f.newHandle; f.newName = found.names?.[0] || f.newName || found.handles[0] || '';
         f.newPhone = found.phones[0] || ''; f.newEmail = found.emails[0] || '';
       }
       const fake = known && customer(known).status === 'fake';
@@ -695,7 +720,7 @@
           phone: f.newPhone || '', email: f.newEmail || '', status: 'ok', vat: f.newVat || undefined, addresses: f.mode === 'delivery' ? [{ ...f.address }] : [], notes: '', since: TODAY, conv: f.conv });
       } else if (cid && f.conv) { customer(cid).conv = f.conv; }
       if (!f.newCustomer && cid && f.mode === 'delivery') {
-        const c = customer(cid); if (!c.addresses.some(a => fmtAddr(a) === fmtAddr(f.address))) c.addresses.push({ ...f.address });
+        const c = customer(cid); if (!c.addresses.some(a => sameAddr(a, f.address))) c.addresses.push({ ...f.address });
       }
       const n = nextNumber(priv ? 'B' : 'F');
       const sNew = { id: n.id, no: n.no, date: TODAY, pieces: [p.id], price: f.price, customer: cid, reservation: f.deposit, private: priv || undefined, payments: [],
@@ -931,24 +956,66 @@
   }
 
   /* ---------- Livraisons ---------- */
+  // Modifier une livraison : on colle (ou on scanne) le message du client, l'app propose date, créneau et adresse ; tout reste modifiable.
+  function editDelivery(s) {
+    const l = L(), x = l.delivx, d = s.delivery, b = buyer(s);
+    let ctrl = null, dict = null;
+    sheet(x.title, close => {
+      const f = { address: { ...(d.address || { street: '', zip: '', city: '' }) }, date: d.date && d.date >= TODAY ? d.date : TODAY, slot: d.slot || '' };
+      const msg = h('textarea', { class: 'input', rows: 3, placeholder: x.msgPh });
+      const found = h('div', {});
+      const fields = h('div', { class: 'stack' });
+      const err = h('p', { class: 'alert bad', hidden: true, role: 'alert' }, icon('alert'), x.incomplete);
+      const paintFields = () => fill(fields,
+        b.c?.addresses?.length ? h('div', { class: 'choices' }, b.c.addresses.map((a, i) => radio(`addr-${s.id}`, String(i), fmtAddr(a), () => { f.address = { ...a }; paintFields(); }, fmtAddr(a) === fmtAddr(f.address)))) : null,
+        addressFields(f.address),
+        h('div', { class: 'grid2' }, field(l.deliv.date, h('input', { class: 'input', type: 'date', value: f.date, min: TODAY, oninput: e => { f.date = e.target.value; } })),
+          field(l.deliv.slot, h('input', { class: 'input', value: f.slot, placeholder: '14:00–16:00', oninput: e => { f.slot = e.target.value; } }))),
+        f.address.zip && !inFreeZone(f.address) ? h('p', { class: 'alert' }, icon('alert'), l.deliv.outZone) : null);
+      const analyse = text => {
+        const r = E.parseDelivery(text, TODAY);
+        if (r.address) f.address = { ...r.address };
+        if (r.date) f.date = r.date;
+        if (r.slot) f.slot = r.slot;
+        const got = [r.date ? `${l.deliv.date} : ${E.date(r.date)}` : null, r.slot ? `${l.deliv.slot} : ${r.slot}` : null, r.address ? `${l.deliv.address} : ${fmtAddr(r.address)}` : null].filter(Boolean);
+        fill(found, got.length ? h('p', { class: 'alert good' }, icon('check'), h('span', {}, h('b', { text: x.found }), h('br'), got.join(' — ')))
+          : h('p', { class: 'alert' }, icon('alert'), x.nothing));
+        paintFields();
+      };
+      const stage = h('div', {});
+      const shotIn = h('input', { type: 'file', accept: 'image/*', class: 'sr', id: `deliv-shot-${s.id}`, onchange: async e => {
+        const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+        ctrl?.abort();
+        const my = ctrl = new AbortController(), st = ocrStage(file, () => my.abort());
+        fill(stage, st.el); fill(found);
+        try {
+          const text = await readImage(file, pr => { if (ctrl === my) st.set(pr); }, my.signal);
+          if (ctrl !== my) return;  // une capture plus récente a été choisie entre-temps
+          msg.value = text; st.done(text.length); analyse(text);
+        } catch (err) { if (ctrl !== my) return; if (err?.name === 'AbortError') { fill(stage); msg.focus(); } else st.fail(l.cust.scanFail); }
+        finally { if (ctrl === my) ctrl = null; }
+      } });
+      dict = dictate(msg, analyse);
+      paintFields();
+      return h('form', { class: 'stack', onsubmit: e => {
+        e.preventDefault();
+        if (!(fullAddr(f.address) && f.date && f.date >= TODAY)) { err.hidden = false; return; }
+        d.address = { ...f.address }; d.date = f.date; d.slot = f.slot.trim();
+        if (d.status === 'failed') { d.status = 'planned'; delete d.note; }
+        if (b.c && !b.c.addresses.some(a => sameAddr(a, d.address))) b.c.addresses.push({ ...d.address });
+        save(); close(); render(); toast(l.deliv.saved);
+      } },
+        h('div', { class: 'sub-panel stack' }, h('h3', { text: x.fromMsg }), h('p', { class: 'hint', text: x.fromMsgHint }), msg,
+          h('div', { class: 'row' }, btn(x.analyse, () => analyse(msg.value), 'small primary', 'search'), dict,
+            h('label', { class: 'btn small', for: `deliv-shot-${s.id}` }, icon('scan'), x.shot), shotIn,
+            (navigator.clipboard || {}).readText ? btn(l.scanx.pasteText, async () => { try { msg.value = await navigator.clipboard.readText(); analyse(msg.value); } catch { toast(l.scanx.clipDenied); } }, 'small', 'copy') : null),
+          stage, found),
+        fields, err, h('button', { type: 'submit', class: 'btn primary big', text: x.save }));
+    }, () => { ctrl?.abort(); dict?.stop?.(); });
+  }
   function deliveryPanel(s) {
     const l = L(), d = s.delivery, b = buyer(s);
     if (d.mode !== 'delivery') return panel(l.deliv.title, null, h('p', { class: 'row' }, icon('stock'), l.deliv.mode.pickup));
-    const editAddr = () => sheet(l.deliv.address, close => {
-      const a = { ...d.address };
-      return h('form', { class: 'stack', onsubmit: e => {
-        e.preventDefault(); if (!(a.street && a.zip && a.city)) return;
-        d.address = a; if (b.c && !b.c.addresses.some(x => fmtAddr(x) === fmtAddr(a))) b.c.addresses.push({ ...a });
-        save(); close(); render(); toast(l.deliv.saved);
-      } }, b.c?.addresses?.length ? h('div', { class: 'choices' }, b.c.addresses.map((x, i) => radio('addr', String(i), fmtAddr(x), () => { Object.assign(a, x); close(); d.address = { ...x }; save(); render(); toast(l.deliv.saved); }, fmtAddr(x) === fmtAddr(d.address)))) : null,
-      addressFields(a), h('button', { type: 'submit', class: 'btn primary big', text: l.cust.save }));
-    });
-    const reschedule = () => sheet(l.deliv.reschedule, close => {
-      let date = d.date, slot = d.slot || '';
-      return h('form', { class: 'stack', onsubmit: e => { e.preventDefault(); d.date = date; d.slot = slot; d.status = 'planned'; delete d.note; save(); close(); render(); toast(l.deliv.saved); } },
-        h('div', { class: 'grid2' }, field(l.deliv.date, h('input', { class: 'input', type: 'date', value: date, min: TODAY, oninput: e => { date = e.target.value; } })),
-          field(l.deliv.slot, h('input', { class: 'input', value: slot, oninput: e => { slot = e.target.value; } }))), h('button', { type: 'submit', class: 'btn primary big', text: l.deliv.reschedule }));
-    });
     const fail = () => sheet(l.deliv.fail, close => {
       let note = '', markFake = false;
       return h('form', { class: 'stack', onsubmit: e => {
@@ -966,7 +1033,7 @@
       active && d.status !== 'done' ? h('div', { class: 'row', style: 'margin-top:12px' },
         d.status === 'planned' ? btn(l.deliv.markDone, () => { d.status = 'done'; save(); render(); toast(l.deliv.saved); }, 'small primary', 'check') : null,
         d.status === 'planned' ? btn(l.deliv.fail, fail, 'small', 'alert') : null,
-        btn(l.deliv.edit, editAddr, 'small', 'edit'), btn(l.deliv.reschedule, reschedule, 'small', 'clock'),
+        btn(l.delivx.edit, () => editDelivery(s), 'small', 'edit'),
         btn(l.deliv.copy, () => copy(fmtAddr(d.address)), 'small', 'copy'),
         btn(l.sendx.notify, () => sendSheet(b.c, ['delivery', 'address'], saleMsgData(s)), 'small', 'chat'),
         d.status === 'failed' ? btn(s.private ? l.broc.deleteSale : l.deliv.relist, () => cancelSale(s), 'small danger', 'sync') : null) : null);
@@ -989,7 +1056,7 @@
             h('span', { class: 'muted', text: fmtAddr(s.delivery.address) }),
             s.delivery.note ? h('span', { class: 'note', text: s.delivery.note }) : null,
             balance(s) > 0 ? pill('reserved', `${l.sales.balance} ${money(balance(s))}`) : null),
-          link(`#/sale/${s.id}`, { class: 'btn small' }, l.deliv.edit));
+          h('div', { class: 'row deliv-acts' }, k !== 'done' ? btn(l.delivx.edit, () => editDelivery(s), 'small primary', 'edit') : null, link(`#/sale/${s.id}`, { class: 'btn small' }, l.piece.seeSale)));
       })) : h('p', { class: 'muted', text: l.deliv.none })))) ];
   }
 
@@ -1032,17 +1099,27 @@
     };
     return [make('normal'), make('bright')];
   }
-  async function readImage(file, onProgress) {
-    const T = await loadTesseract();
-    const passes = await prepareImage(file);
+  // Lecture d'une capture. onProgress reçoit { stage: 'load' | 'prep' | 'read', pct, pass, passes } ; signal (AbortSignal) arrête la lecture.
+  async function readImage(file, onProgress = () => {}, signal) {
+    const stopped = new Promise((_, rej) => signal?.addEventListener('abort', () => rej(new DOMException('stop', 'AbortError')), { once: true }));
+    stopped.catch(() => {});
+    const until = p => (signal ? Promise.race([p, stopped]) : p);
+    onProgress({ stage: 'load', pct: 0 });
+    const T = await until(loadTesseract());
+    onProgress({ stage: 'prep', pct: 0 });
+    const passes = await until(prepareImage(file));
     let pass = 0;
-    const worker = await T.createWorker(['fra', 'nld', 'eng'], 1, { logger: m => {
-      if (m.status === 'recognizing text') onProgress(Math.round(((pass + m.progress) / passes.length) * 100));
+    const made = T.createWorker(['fra', 'nld', 'eng'], 1, { logger: m => {
+      if (m.status === 'recognizing text') onProgress({ stage: 'read', pct: Math.round(((pass + m.progress) / passes.length) * 100), pass, passes: passes.length });
+      else if (/loading/.test(m.status || '')) onProgress({ stage: 'load', pct: Math.round((m.progress || 0) * 100) });
     } });
+    signal?.addEventListener('abort', () => made.then(w => w.terminate()).catch(() => {}), { once: true });  // arrêté pendant le chargement
+    const worker = await until(made);
     try {
       const seen = new Set(), lines = [];
       for (const canvas of passes) {
-        const text = (await worker.recognize(canvas)).data.text || '';
+        onProgress({ stage: 'read', pct: Math.round((pass / passes.length) * 100), pass, passes: passes.length });
+        const text = (await until(worker.recognize(canvas))).data.text || '';
         for (const line of text.split('\n').map(s => s.trim()).filter(s => s.length > 1)) {
           const key = line.toLowerCase().replace(/\s+/g, ' ');
           if (!seen.has(key)) { seen.add(key); lines.push(line); }
@@ -1050,69 +1127,265 @@
         pass++;
       }
       return lines.join('\n');
-    } finally { await worker.terminate(); }
+    } finally { worker.terminate(); }
   }
   window.EtiketOCR = { readImage, parse: E.parseContact };  // exposé pour les tests de bout en bout
-  // Bloc de scan réutilisable (fenêtre ou écran) : capture choisie, partagée vers l'app ou collée ; texte lu modifiable ; actions fournies par l'appelant.
+
+  // Lecture en cours : la capture avec une ligne de balayage, l'étape en clair, une barre de progression et « Arrêter »
+  function ocrStage(file, onCancel) {
+    const x = L().scanx;
+    const bar = h('span', {});
+    const track = h('div', { class: 'scan-bar indet', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': x.reading }, bar);
+    const label = h('b', { text: x.stage.load }), pctEl = h('span', { class: 'scan-pct', 'aria-hidden': 'true' }), sub = h('span', { class: 'hint', text: x.loadHint });
+    const img = h('img', { alt: x.shotAlt }); img.src = URL.createObjectURL(file);
+    const free = () => URL.revokeObjectURL(img.src);
+    img.addEventListener('load', free, { once: true }); img.addEventListener('error', free, { once: true });
+    const fig = h('figure', { class: 'scan-shot busy' }, img, h('span', { class: 'scan-beam', 'aria-hidden': 'true' }));
+    // seul le nom de l'étape est annoncé (role=status) ; le pourcentage passe par la barre (aria-valuenow)
+    const state = h('div', { class: 'scan-state' }, h('p', { class: 'row' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), h('span', { role: 'status' }, label), pctEl), track, sub,
+      onCancel ? btn(x.cancel, onCancel, 'small', 'close') : null);
+    const el = h('div', { class: 'scan-stage', 'aria-busy': 'true' }, fig, state);
+    const t0 = Date.now();
+    const finish = () => { fig.classList.remove('busy'); el.removeAttribute('aria-busy'); };
+    return {
+      el,
+      set({ stage, pct = 0, pass = 0, passes = 2 }) {
+        const all = stage === 'load' ? pct * 0.15 : stage === 'prep' ? 15 : 15 + pct * 0.83;
+        bar.style.width = `${Math.max(4, Math.round(all))}%`;
+        track.setAttribute('aria-valuenow', String(Math.round(all)));
+        track.classList.toggle('indet', stage === 'load' && !pct);
+        if (label.textContent !== x.stage[stage]) label.textContent = x.stage[stage];
+        pctEl.textContent = stage === 'read' ? `${pct} %` : '';
+        const note = stage === 'read' ? x.pass(pass + 1, passes) : stage === 'load' ? x.loadHint : '';
+        if (sub.textContent !== note) sub.textContent = note;
+      },
+      done(chars) { finish(); fill(state, h('p', { class: 'row scan-ok' }, icon('check'), h('b', { text: x.doneIn(Math.max(1, Math.round((Date.now() - t0) / 1000)), chars) }))); },
+      fail(msg) { finish(); fill(state, h('p', { class: 'alert bad' }, icon('alert'), msg)); },
+    };
+  }
+
+  // Dictée : la reconnaissance vocale du navigateur (fr-BE ou nl-BE) écrit dans le champ ; à l'arrêt, onDone relance l'analyse
+  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  function dictate(target, onDone) {
+    const x = L().voice;
+    if (!Speech) return h('p', { class: 'hint', text: x.none });
+    let rec = null;
+    const live = h('span', { class: 'dictate-live' });  // texte provisoire : visible, pas annoncé à chaque mot
+    const b = h('button', { type: 'button', class: 'btn small dictate', 'aria-pressed': 'false', onclick: () => (rec ? rec.stop() : start()) }, icon('mic'), h('span', { text: x.start }));
+    const idle = () => { rec = null; b.setAttribute('aria-pressed', 'false'); b.lastChild.textContent = x.start; live.textContent = ''; };
+    function start() {
+      const base = target.value.trim();
+      let heard = '';
+      rec = new Speech();
+      rec.lang = P.lang === 'nl' ? 'nl-BE' : 'fr-BE'; rec.interimResults = true; rec.continuous = true;
+      rec.onresult = e => {
+        if (!b.isConnected) { rec?.abort(); return; }  // fenêtre fermée ou écran quitté : le micro se coupe
+        let fin = '', tmp = '';
+        for (const r of Array.from(e.results)) { if (r.isFinal) fin += `${r[0].transcript} `; else tmp += r[0].transcript; }
+        heard = fin.trim();
+        target.value = [base, E.fromSpeech(heard)].filter(Boolean).join('\n');
+        live.textContent = tmp ? `« ${tmp} »` : x.listening;
+      };
+      rec.onerror = e => toast(['not-allowed', 'service-not-allowed'].includes(e.error) ? x.denied : e.error === 'no-speech' ? x.silence : x.fail);
+      rec.onend = () => { idle(); if (heard) onDone?.(target.value); };
+      try { rec.start(); b.setAttribute('aria-pressed', 'true'); b.lastChild.textContent = x.stop; live.textContent = x.listening; } catch { idle(); toast(x.fail); }
+    }
+    const wrap = h('span', { class: 'dictate-wrap' }, b, live);
+    wrap.stop = () => rec?.abort();
+    return wrap;
+  }
+
+  // Capture d'exemple (conversation fictive dessinée dans le navigateur) : essayer le scan sans avoir de vraie capture
+  function sampleShot() {
+    const nl = P.lang === 'nl';
+    const msgs = nl
+      ? [[0, 'Dag, is de vintage commode nog te koop?'], [1, 'Dag! Ja, ze kost 320 €.'], [0, 'Akkoord voor 300 €? Mijn naam is Lea Martin'], [1, 'Akkoord voor 300 €'],
+        [0, 'Levering Kerkstraat 5, 2000 Antwerpen'], [0, 'Gsm 0470 00 00 77'], [0, 'lea.martin@demo.test']]
+      : [[0, 'Bonjour, la commode vintage est toujours dispo ?'], [1, 'Bonjour ! Oui, elle est à 320 €.'], [0, 'Ok pour 300 € ? Je m’appelle Léa Martin'], [1, 'D’accord pour 300 €'],
+        [0, 'Livraison Avenue Louise 54, 1050 Ixelles'], [0, 'Mon GSM : 0470 00 00 77'], [0, 'lea.martin@demo.test']];
+    const W = 720, c = h('canvas', { width: W, height: 1180 }), g = c.getContext('2d');
+    g.fillStyle = '#ECE5DD'; g.fillRect(0, 0, W, 1180);
+    g.fillStyle = '#075E54'; g.fillRect(0, 0, W, 110);
+    g.fillStyle = '#FFFFFF'; g.font = '600 34px Arial, sans-serif'; g.fillText(nl ? 'Lea (fictief)' : 'Léa (fictive)', 36, 68);
+    g.font = '28px Arial, sans-serif';
+    let y = 160;
+    for (const [me, text] of msgs) {
+      const tw = g.measureText(text).width, bw = tw + 48, bx = me ? W - bw - 28 : 28;
+      g.fillStyle = me ? '#DCF8C6' : '#FFFFFF';
+      g.beginPath(); if (g.roundRect) g.roundRect(bx, y, bw, 70, 16); else g.rect(bx, y, bw, 70); g.fill();
+      g.fillStyle = '#111111'; g.fillText(text, bx + 24, y + 46);
+      y += 70 + 26;
+    }
+    return new Promise(res => c.toBlob(b => res(new File([b], 'exemple.png', { type: 'image/png' })), 'image/png'));
+  }
+
+  // Bloc de scan réutilisable (fenêtre ou écran), en trois étapes : 1 la source (capture, collage, exemple), 2 la lecture,
+  // 3 la vérification champ par champ. Le texte reste modifiable (clavier ou dictée) ; actions(c, text) fournit les boutons finaux.
+  let scanOff = null;  // arrêt du bloc de scan précédent (lecture, dictée, écouteur de collage)
   function scanUI(actions) {
     const l = L(), x = l.scanx;
+    scanOff?.();
     const out = h('div', { class: 'stack' });
-    const shot = h('div', {});
+    const stageBox = h('div', {});
     const paste = h('textarea', { class: 'input', rows: 5, placeholder: x.pastePh });
-    const showParsed = (text, fromImage) => {
-      const c = E.parseContact(text);
-      const rows = [[l.cust.phone, c.phones], [l.cust.email, c.emails], [l.cust.handle, c.handles], [l.cust.addresses, c.addresses.map(fmtAddr)], [l.cust.amounts, c.amounts.map(money)]].filter(([, v]) => v.length);
-      fill(out, fromImage ? h('p', { class: 'muted', text: x.chars(text.length) }) : null,
-        rows.length ? h('div', { class: 'stack' }, h('h3', { text: l.cust.found }),
-          h('dl', { class: 'facts' }, rows.map(([k, v]) => h('div', {}, h('dt', { text: k }), h('dd', { text: v.join(' — ') })))),
-          h('div', { class: 'stack' }, actions(c, text)))
-          : h('p', { class: 'alert' }, icon('alert'), h('span', {}, h('b', { text: l.cust.none }), h('br'), x.editHint)));
+    const steps = h('ol', { class: 'scan-steps' }, x.steps.map((t, i) => h('li', { 'aria-current': i === 0 ? 'step' : null }, h('span', { class: 'n', text: String(i + 1) }), h('span', { text: t }))));
+    const stepTo = n => [...steps.children].forEach((li, i) => { if (i === n) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current'); li.classList.toggle('done', i < n); });
+    let ctrl = null;
+    const showParsed = text => {
+      if (text.replace(/\s/g, '').length < 3) { fill(out, h('p', { class: 'alert' }, icon('alert'), x.editHint)); stepTo(0); return; }
+      stepTo(2);
+      fill(out, review(E.parseContact(text), text, actions));
+      out.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     };
     const runFile = async file => {
       if (!/^image\//.test(file.type || 'image/') || file.size > 15 * 1024 * 1024) { fill(out, h('p', { class: 'alert bad' }, icon('alert'), x.tooBig)); return; }
-      const preview = h('img', { class: 'scan-preview', alt: '' }); preview.src = URL.createObjectURL(file);
-      const status = h('p', { class: 'row', role: 'status' }, icon('clock'), h('span', { text: l.cust.scanLoading }));
-      fill(out, status); fill(shot, preview);
+      ctrl?.abort();
+      const my = ctrl = new AbortController();
+      const st = ocrStage(file, () => my.abort());
+      fill(stageBox, st.el); fill(out); stepTo(1);
+      el.classList.add('has-shot');
+      const reset = () => { el.classList.remove('has-shot'); stepTo(0); };  // la zone de choix se réduit : la lecture en cours passe au premier plan
+      st.el.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
       try {
-        const text = await readImage(file, pr => { status.lastChild.textContent = l.cust.scanning(pr); });
+        const text = await readImage(file, p => { if (!el.isConnected) my.abort(); else if (ctrl === my) st.set(p); }, my.signal);
+        if (ctrl !== my) return;
         paste.value = text;
-        if (text.replace(/\s/g, '').length < 3) fill(out, h('p', { class: 'alert bad' }, icon('alert'), x.noText));
-        else showParsed(text, true);
-      } catch { fill(out, h('p', { class: 'alert bad' }, icon('alert'), l.cust.scanFail)); }
+        if (text.replace(/\s/g, '').length < 3) { st.fail(x.noText); reset(); }
+        else { st.done(text.length); showParsed(text); }
+      } catch (err) {
+        if (ctrl !== my) return;
+        if (err?.name === 'AbortError') { fill(stageBox); reset(); if (el.isConnected) { toast(x.stopped); paste.focus(); } } else { st.fail(l.cust.scanFail); reset(); }
+      } finally { if (ctrl === my) ctrl = null; }
     };
-    const setText = t => { paste.value = t; showParsed(t, false); };
+    const setText = t => { paste.value = t; showParsed(t); };
     const inputId = `scan-in-${Math.random().toString(36).slice(2, 7)}`;
     const input = h('input', { type: 'file', accept: 'image/*', class: 'sr', id: inputId, onchange: e => { const f = e.target.files[0]; if (f) runFile(f); e.target.value = ''; } });
     const clip = navigator.clipboard || {};
-    const el = h('div', { class: 'stack' }, h('p', { class: 'muted', text: l.cust.scanHint }),
-      h('label', { class: 'dropzone', for: inputId }, icon('scan'), x.pick), input,
-      h('div', { class: 'row' },
-        clip.read ? btn(x.pasteShot, async () => {
-          try { for (const item of await clip.read()) { const type = item.types.find(t => t.startsWith('image/')); if (type) { runFile(await item.getType(type)); return; } } toast(x.clipEmpty); }
-          catch { toast(x.clipDenied); } }, 'small', 'download') : null,
-        clip.readText ? btn(x.pasteText, async () => { try { const t = await clip.readText(); if (t.trim()) setText(t); else toast(x.clipEmpty); } catch { toast(x.clipDenied); } }, 'small', 'copy') : null),
+    const pasteAny = async () => {
+      try {
+        if (clip.read) for (const item of await clip.read()) { const type = item.types.find(t => t.startsWith('image/')); if (type) { runFile(await item.getType(type)); return; } }
+        const t = clip.readText ? await clip.readText() : '';
+        if (t.trim()) setText(t); else toast(x.clipEmpty);
+      } catch { toast(x.clipDenied); }
+    };
+    const drop = h('label', { class: 'dropzone scan-pick', for: inputId,
+      ondragover: e => { e.preventDefault(); drop.classList.add('over'); }, ondragleave: () => drop.classList.remove('over'),
+      ondrop: e => { e.preventDefault(); drop.classList.remove('over'); const f = [...(e.dataTransfer?.files || [])].find(ff => /^image\//.test(ff.type)); if (f) runFile(f); } },
+      icon('scan'), h('b', { text: x.pick }), h('span', { class: 'hint', text: x.pickHint }));
+    // Ctrl+V d'une capture n'importe où sur l'écran, tant que le bloc est affiché
+    const listen = new AbortController();
+    document.addEventListener('paste', e => {
+      if (!el.isConnected) { listen.abort(); return; }
+      const f = [...(e.clipboardData?.files || [])].find(ff => /^image\//.test(ff.type));
+      if (f) { e.preventDefault(); runFile(f); }
+    }, { signal: listen.signal });
+    const dict = dictate(paste, t => showParsed(t));
+    const el = h('div', { class: 'scan-flow stack' }, steps,
+      h('p', { class: 'muted', text: l.cust.scanHint }),
+      h('div', { class: 'scan-sources' }, drop, input,
+        h('div', { class: 'scan-alt' },
+          clip.read || clip.readText ? btn(x.pasteAny, pasteAny, '', 'copy') : null,
+          btn(x.sample, async () => runFile(await sampleShot()), '', 'image'))),
       h('p', { class: 'hint', text: x.shareHint }),
-      shot, field(x.textLabel, paste), btn(x.analyse, () => showParsed(paste.value, false), 'small', 'search'), out);
-    return { el, runFile, setText };
+      stageBox,
+      h('div', { class: 'sub-panel stack scan-text' }, field(x.textLabel, paste, x.textHint),
+        h('div', { class: 'row' }, dict, btn(x.analyse, () => showParsed(paste.value), 'small primary', 'search')),
+        Speech ? h('p', { class: 'note', text: l.voice.privacy }) : null),
+      out);
+    const stop = () => { ctrl?.abort(); ctrl = null; dict.stop?.(); listen.abort(); if (scanOff === stop) scanOff = null; };
+    scanOff = stop;
+    return { el, runFile, setText, stop };
   }
+
+  // Étape 3 : chaque information trouvée devient un champ modifiable avec son verdict ; seules les cases cochées sont reprises.
+  // Les champs vides restent proposés pour être complétés au clavier. Tant qu'un champ coché est à corriger, les actions sont bloquées.
+  function review(found, text, actions) {
+    const l = L(), x = l.scanx, v = l.verify;
+    const handle0 = found.handles.find(hh => hh.toLowerCase() !== `@${S.shop.instagram}`.toLowerCase()) || '';
+    const amount0 = found.agreed ?? (found.amounts.length ? found.amounts[found.amounts.length - 1] : null);
+    const F = {
+      name: { on: !!found.names[0], val: found.names[0] || '', alts: found.names },
+      phone: { on: !!found.phones[0], val: found.phones[0] || '', alts: found.phones },
+      email: { on: !!found.emails[0], val: found.emails[0] || '', alts: found.emails },
+      handle: { on: !!handle0, val: handle0, alts: found.handles.filter(hh => hh.toLowerCase() !== `@${S.shop.instagram}`.toLowerCase()) },
+      address: { on: !!found.addresses[0], val: { ...(found.addresses[0] || { street: '', zip: '', city: '' }) }, alts: found.addresses.map(fmtAddr) },
+      amount: { on: amount0 != null, val: amount0 ?? '', alts: found.amounts.map(a => String(a)) },
+    };
+    const verdict = k => E.checkField(k, F[k].val);
+    const summary = h('p', { class: 'row verify-sum', role: 'status' });
+    const acts = h('div', { class: 'stack' });
+    const current = () => {
+      const on = k => F[k].on && verdict(k) === 'ok';
+      const amt = on('amount') ? E.toAmount(F.amount.val) : null;
+      const hd = String(F.handle.val).trim();
+      return { names: on('name') ? [F.name.val.trim()] : [], phones: on('phone') ? [F.phone.val.trim()] : [], emails: on('email') ? [F.email.val.trim()] : [],
+        handles: on('handle') ? [hd.startsWith('@') ? hd : `@${hd}`] : [], addresses: on('address') ? [{ ...F.address.val }] : [],
+        amounts: amt != null ? [amt] : [], agreed: amt };
+    };
+    const rows = {};
+    const paintRow = k => {
+      const r = rows[k], ver = verdict(k);
+      r.el.className = `verify-row ${F[k].on ? ver : 'off'}`;
+      fill(r.badge, ver === 'ok' ? [icon('check'), v.ok] : ver === 'bad' ? [icon('alert'), v.bad[k]] : v.empty);
+    };
+    const refresh = () => {
+      Object.keys(F).forEach(paintRow);
+      const kept = Object.keys(F).filter(k => F[k].on && verdict(k) !== 'empty');
+      const bad = kept.filter(k => verdict(k) === 'bad');
+      const said = kept.length ? v.sum(kept.length, bad.length) : v.nothing;
+      if (summary.textContent !== said) fill(summary, icon(bad.length ? 'alert' : 'check'), h('span', { text: said }));
+      summary.className = `row verify-sum ${bad.length ? 'bad' : kept.length ? 'ok' : ''}`;
+      fill(acts, bad.length ? h('p', { class: 'hint', text: v.blocked }) : null, actions(current(), text));
+      if (bad.length || !kept.length) acts.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    };
+    const touch = k => { F[k].on = verdict(k) !== 'empty'; rows[k].box.checked = F[k].on; refresh(); };  // écrit = coché, vidé = décoché
+    const input = (k, attrs) => h('input', Object.assign({ class: 'input', value: F[k].val, autocomplete: 'off', oninput: e => { F[k].val = e.target.value; touch(k); } }, attrs));
+    const editors = {
+      name: () => input('name', { placeholder: v.ph.name }),
+      phone: () => input('phone', { type: 'tel', inputmode: 'tel', placeholder: '+32 470 00 00 00' }),
+      email: () => input('email', { type: 'email', inputmode: 'email', placeholder: 'nom@exemple.be' }),
+      handle: () => input('handle', { placeholder: '@compte' }),
+      address: () => addressFields(F.address.val, () => touch('address')),
+      amount: () => h('input', { class: 'input money', inputmode: 'decimal', value: F.amount.val, placeholder: '0', oninput: e => { F.amount.val = e.target.value; touch('amount'); } }),
+    };
+    const labels = { name: l.cust.name, phone: l.cust.phone, email: l.cust.email, handle: l.cust.handle, address: l.deliv.address, amount: v.price };
+    const list = Object.keys(F).map(k => {
+      const box = h('input', { type: 'checkbox', checked: F[k].on, 'aria-label': v.keep(labels[k]), onchange: e => { F[k].on = e.target.checked; refresh(); } });
+      const badge = h('span', { class: 'verdict' });
+      const ed = h('div', {}, editors[k]());
+      const others = F[k].alts.length > 1 ? h('div', { class: 'chips small' }, h('span', { class: 'hint', text: v.others }),
+        F[k].alts.map((a, i) => h('button', { type: 'button', text: a, onclick: () => {
+          F[k].val = k === 'address' ? { ...found.addresses[i] } : k === 'amount' ? found.amounts[i] : a;
+          fill(ed, editors[k]()); touch(k);
+        } }))) : null;
+      const el = h('div', { class: 'verify-row' }, h('label', { class: 'verify-keep' }, box, h('span', { class: 'box' })),
+        h('div', { class: 'verify-main' }, h('div', { class: 'verify-head' }, h('b', { text: labels[k] }), badge), ed, others));
+      rows[k] = { el, box, badge };
+      return el;
+    });
+    refresh();
+    return h('section', { class: 'verify stack', 'aria-label': x.steps[2] }, h('h3', { text: v.title }), summary, h('p', { class: 'hint', text: v.hint }), list, acts);
+  }
+
   function scanSheet(onApply) {
     const l = L();
-    sheet(l.cust.scan, close => scanUI((c, text) => [btn(l.cust.apply, () => { onApply(c, text); close(); }, 'primary big', 'check')]).el);
+    let ui = null;
+    sheet(l.cust.scan, close => (ui = scanUI((c, text) => [btn(l.cust.apply, () => { onApply(c, text); close(); }, 'primary big', 'check')])).el, () => ui?.stop());
   }
 
   /* ---------- Écran « Scanner » : capture partagée depuis WhatsApp, Instagram, SMS ou la galerie ---------- */
   let pendingScan = null;
-  function viewScan() {
+  function viewScan(q) {
     const l = L(), x = l.scanx;
+    const forSale = S.pieces.filter(p => ['live', 'reserved'].includes(p.status) && !p.saleId);
+    let pick = forSale[0]?.id || '';  // gardé quand les actions se redessinent pendant la vérification
     const ui = scanUI((c, text) => {
       const known = E.matchCustomer({ ...c, handles: c.handles.filter(hh => hh.toLowerCase() !== `@${S.shop.instagram}`) }, S.customers);
-      const forSale = S.pieces.filter(p => ['live', 'reserved'].includes(p.status) && !p.saleId);
-      let pick = forSale[0]?.id || '';
       return [
         known ? h('p', { class: customer(known).status === 'fake' ? 'alert bad' : 'alert good' }, icon(customer(known).status === 'fake' ? 'alert' : 'user'), l.sellx.known(customer(known).name)) : null,
         h('div', { class: 'sub-panel stack' }, h('h3', { text: x.sellTitle }),
           field(x.whichPiece, h('select', { class: 'input', onchange: e => { pick = e.target.value; } },
-            forSale.map(p => h('option', { value: p.id, text: `n° ${p.no} ${title(p)} — ${money(p.price || 0)}${isPrivate(p) ? ` (${l.scope.private})` : ''}` })))),
+            forSale.map(p => h('option', { value: p.id, selected: p.id === pick, text: `n° ${p.no} ${title(p)} — ${money(p.price || 0)}${isPrivate(p) ? ` (${l.scope.private})` : ''}` })))),
           btn(x.sellGo, () => { if (!pick) return; pendingScan = { found: c, text }; go(`#/sell/${pick}?fromscan=1`); }, 'primary big', 'sales')),
         btn(known ? x.updateCust : x.newCust, () => {
           if (known) { const k = customer(known); mergeContact(k, c); k.conv = text.slice(0, 600); save(); toast(l.cust.saved); go(`#/customer/${known}`); return; }
@@ -1126,6 +1399,8 @@
       if (shotRes) { ui.runFile(await shotRes.blob()); await cache.delete('shared-shot'); }
       if (textRes) { const t = await textRes.text(); await cache.delete('shared-text'); if (!shotRes && t.trim()) ui.setText(t); }
     }).catch(() => {});
+    // « Essayer avec l'exemple » depuis la visite : la capture fictive est lue tout de suite
+    if (q?.get('demo')) { history.replaceState(null, '', '#/scan'); sampleShot().then(ui.runFile); }
     return [head(l.cust.scan, x.intro), h('div', { class: 'cols' }, h('div', {}, ui.el),
       panel(x.howT, null, h('ol', { class: 'bullets' }, x.how.map(s => h('li', { text: s })))))];
   }
@@ -1195,8 +1470,9 @@
     if (found.phones[0] && !c.phone) c.phone = found.phones[0];
     if (found.emails[0] && !c.email) c.email = found.emails[0];
     if (found.handles[0] && !c.handle) { c.handle = found.handles[0]; c.channel = c.channel || 'instagram'; }
+    if (found.names?.[0] && (!c.name || c.name === c.handle)) c.name = found.names[0];
     if (!c.name && c.handle) c.name = c.handle;
-    for (const a of found.addresses) if (!c.addresses.some(x => fmtAddr(x) === fmtAddr(a))) c.addresses.push(a);
+    for (const a of found.addresses) if (!c.addresses.some(x => sameAddr(x, a))) c.addresses.push(a);
   }
   let custDraft = null;
   function viewCustomers(q) {
@@ -1232,6 +1508,7 @@
     const inp = (k, ph, type = 'text') => h('input', { class: 'input', type, value: c[k] || '', placeholder: ph || '', oninput: e => { c[k] = e.target.value; } });
     const paint = () => fill(form,
       h('div', { class: 'grid2' }, field(l.cust.name, inp('name')), field(l.cust.handle, inp('handle', '@'))),
+      /^@?[A-Za-z0-9._]{1,30}$/.test(c.handle || '') ? igLink(`https://www.instagram.com/${c.handle.replace(/^@/, '')}/`, l.igx.seeCustomer(c.handle)) : null,
       h('div', { class: 'grid2' }, field(l.cust.phone, inp('phone', '+32 4…', 'tel')), field(l.cust.email, inp('email', '', 'email'))),
       h('div', { class: 'grid2' }, field(l.cust.channel, h('select', { class: 'input', onchange: e => { c.channel = e.target.value; } },
         Object.entries(l.cust.channels).map(([k, v]) => h('option', { value: k, selected: c.channel === k, text: v })))),
@@ -1318,8 +1595,8 @@
     const l = L(), x = E.parseCaption(post.caption);
     const no = S.nextNo++;
     const p = { id: `p${no}`, no, cat: guessCat(x.title), status: 'draft', price: x.price, purchase: null, origin: 'particulier', bought: post.date, photos: 1, tone: no % 8, photo: post.photo,
-      title: { fr: x.title, nl: x.title, en: x.title }, notes: { fr: '', nl: '' }, dims: x.dims, state: x.state, source: 'ig', ig: post.code, seller: { name: '', kind: 'particulier' },
-      listings: { ig: { state: 'live', url: `https://www.instagram.com/${S.shop.instagram}/p/${post.code}/` } } };
+      title: { fr: x.title, nl: x.title, en: x.title }, notes: { fr: '', nl: '' }, dims: x.dims, state: x.state, source: 'ig', ig: post.gone ? undefined : post.code, seller: { name: '', kind: 'particulier' },
+      listings: { ig: { state: 'live', url: igPostUrl(post) } } };
     S.pieces.push(p); post.imported = p.id; save(); toast(l.ig.created);
     return p;
   }
@@ -1331,8 +1608,8 @@
         e.preventDefault(); if (!owner.trim() || !(price > 0)) return;
         const no = S.nextPrivNo++;
         S.pieces.push({ id: `p${no}`, no, cat: guessCat(x.title), status: 'live', price, scope: 'private', owner: owner.trim(), bought: post.date, photos: 1, tone: no % 8, photo: post.photo,
-          title: { fr: x.title, nl: x.title }, dims: x.dims, state: x.state, notes: { fr: '', nl: '' }, ig: post.code, source: 'ig',
-          listings: { ig: { state: 'live', url: `https://www.instagram.com/${S.shop.instagram}/p/${post.code}/` } } });
+          title: { fr: x.title, nl: x.title }, dims: x.dims, state: x.state, notes: { fr: '', nl: '' }, ig: post.gone ? undefined : post.code, source: 'ig',
+          listings: { ig: { state: 'live', url: igPostUrl(post) } } });
         post.imported = `p${no}`; save(); close(); toast(l.broc.added); go(`#/piece/p${no}`);
       } }, h('p', { class: 'alert' }, icon('alert'), l.broc.rule),
       h('p', { class: 'alert' }, icon('alert'), l.igx.shopWarn),
@@ -1363,18 +1640,26 @@
       save(); render(); toast(n ? l.listings.imported(n) : l.listings.importNone);
     };
     const pieceRow = (p, ch, acts) => h('li', {}, h('span', { class: 'lead thumb' }, photoEl(p)),
-      link(`#/piece/${p.id}`, { class: 'main rowlink' }, h('b', { text: `n° ${p.no} ${title(p)}` }), h('span', { text: chLabel(ch) })), h('span', {}), h('div', { class: 'sub' }, acts));
+      link(`#/piece/${p.id}`, { class: 'main rowlink' }, h('b', { text: `n° ${p.no} ${title(p)}` }), h('span', { text: chLabel(ch) })), h('span', {}),
+      h('div', { class: 'sub' }, acts, (() => {
+        const ig = igHref(p);
+        if (acts.some(a => a?.getAttribute?.('href') === ig) || (isPrivate(p) && ig === igProfile())) return null;
+        return igLink(ig, ig === igProfile() ? l.igx.seeProfile(S.shop.instagram) : l.igx.seePost);
+      })()));
     return [
       head(l.listings.title, l.listings.intro),
       h('section', { class: 'ig-band' },
-        h('div', { class: 'ig-head' }, h('div', {}, h('h2', { class: 'row' }, icon('instagram'), l.ig.title), h('p', { class: 'muted', text: `${l.ig.connected} — ${l.ig.last(`${E.date(S.ig.lastSync.slice(0, 10))} ${S.ig.lastSync.slice(11)}`)}` })),
+        h('div', { class: 'ig-head' }, h('div', {}, h('h2', { class: 'row' }, icon('instagram'), l.ig.title), h('p', { class: 'muted', text: `${l.ig.connected} — ${l.ig.last(`${E.date(S.ig.lastSync.slice(0, 10))} ${S.ig.lastSync.slice(11)}`)}` }),
+          igLink(igProfile(), l.igx.seeProfile(S.shop.instagram))),
           h('div', { class: 'row' }, h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: S.ig.auto, onchange: e => { S.ig.auto = e.target.checked; save(); } }), h('span', { text: l.ig.auto })),
             btn(l.ig.sync, () => { S.ig.lastSync = stamp(); save(); render(); toast(l.ig.synced); }, 'small', 'sync'))),
         newPosts().length ? h('div', { class: 'ig-posts' }, newPosts().map(post => { const x = E.parseCaption(post.caption);
-          return h('article', { class: 'ig-post' }, h('div', { class: 'card-ph' }, photoEl({ photo: post.photo, cat: guessCat(x.title), tone: 3, photos: 1 })),
-            h('div', { class: 'stack', style: 'gap:4px' }, h('b', { text: x.title }), h('span', { class: 'muted', text: [x.price ? money(x.price) : null, x.dims].filter(Boolean).join(' — ') }),
-              h('span', { class: 'muted', text: E.date(post.date) })),
-            h('div', { class: 'row' }, btn(l.ig.create, () => { const p = importPost(post); go(`#/add/${p.id}`); }, 'small primary', 'plus'),
+          return h('article', { class: 'ig-post' }, h('div', { class: 'card-ph' }, photoEl({ photo: post.photo, cat: guessCat(x.title), tone: 3, photos: 1 }),
+            x.price ? h('div', { class: 'tag' }, h('span', { class: 'price', text: money(x.price).replace(',00', '') })) : null),
+            h('div', { class: 'ig-post-body' }, h('b', { class: 't', text: x.title }),
+              h('span', { class: 'muted', text: [x.dims, E.date(post.date)].filter(Boolean).join(' · ') }),
+              igLink(igPostUrl(post), post.gone ? l.igx.seeProfile(S.shop.instagram) : l.igx.seePost)),
+            h('div', { class: 'ig-post-acts' }, btn(l.ig.create, () => { const p = importPost(post); go(`#/add/${p.id}`); }, 'small primary', 'plus'),
               btn(l.igx.family, () => importFamily(post), 'small', 'tent')));
         })) : h('p', { class: 'muted', text: l.ig.none }),
         h('details', { class: 'how' }, h('summary', { text: l.ig.howT }), h('ol', {}, l.ig.how.map(x => h('li', { text: x }))), h('p', { class: 'note', text: l.ig.fbNote }))),
@@ -1537,6 +1822,220 @@
     ];
   }
 
+  /* ---------- Visites guidées : de page en page, un projecteur sur le tableau ou le bouton expliqué ----------
+     Trois visites sur le même moteur : « complète » (chaque page, chaque tableau, chaque bouton), « l'essentiel » (l'histoire
+     d'une pièce en 5 chapitres) et « cette page » (bouton Guide). En mode démo guidée (Réglages), la visite complète se propose
+     à chaque connexion et le bouton Guide reste sur toutes les pages, jusqu'à ce qu'on désactive le mode. */
+  const TOUR_KEY = 'etiket-tour-v2';
+  const GUIDE_SESSION = 'etiket-guide-shown';  // une proposition par session de navigateur, pas à chaque page
+  const CHAPTERS = [['receive', 'instagram'], ['sell', 'scan'], ['deliver', 'truck'], ['money', 'payments'], ['daily', 'home']];
+  const TOUR = [
+    { key: 'welcome', route: '#/', icon: 'tag' },
+    { key: 'instagram', ch: 0, route: '#/listings', sel: ['.ig-post', '.ig-band'], icon: 'instagram' },
+    { key: 'stock', ch: 0, route: '#/stock', sel: ['.cards .card'], icon: 'stock' },
+    { key: 'piece', ch: 0, route: () => `#/piece/${tourPiece()}`, sel: ['.piece-head'], icon: 'tag' },
+    { key: 'scanBtn', ch: 1, route: () => `#/piece/${tourPiece()}`, sel: () => [`a[href="#/sell/${tourPiece()}?scan=1"]`], icon: 'scan' },
+    { key: 'scan', ch: 1, route: '#/scan', sel: ['main .scan-sources'], icon: 'scan', try: '#/scan?demo=1' },
+    { key: 'send', ch: 1, route: () => `#/sale/${tourSale()}`, sel: ['.mobile-actions', '.page-head .btn.tagged'], icon: 'chat' },
+    { key: 'delivery', ch: 2, route: '#/deliveries', sel: ['.deliv-acts .btn.primary', '.deliv'], icon: 'truck' },
+    { key: 'payments', ch: 3, route: '#/payments', sel: ['main .list li', 'main .list'], icon: 'payments' },
+    { key: 'vat', ch: 3, route: '#/accounting', sel: ['.grids'], icon: 'accounting' },
+    { key: 'todo', ch: 4, route: '#/', sel: ['.todo', '.home .panel'], icon: 'check' },
+    { key: 'plus', ch: 4, route: '#/', sel: ['.bottom .add-tab', '.side .add-big'], icon: 'plus' },
+    { key: 'family', ch: 4, route: '#/brocante', sel: ['main .cards .card', '.page-head'], icon: 'tent' },
+    { key: 'end', route: '#/', icon: 'guide' },
+  ];
+  const tourPiece = () => (S.pieces.find(p => !isPrivate(p) && p.status === 'live' && !p.saleId) || S.pieces.find(p => !isPrivate(p)) || {}).id;
+  const tourSale = () => (S.sales.find(s => !s.credit && !s.cancelled && !s.private) || S.sales[0] || {}).id;
+  const tourDraft = () => (S.pieces.find(p => p.status === 'draft' && !isPrivate(p)) || {}).id;
+  const tourCustomer = () => (S.customers.find(c => c.status === 'ok') || S.customers[0] || {}).id;
+  // le n-ième panneau visible de la page (les titres changent avec la langue, l'ordre des panneaux non)
+  const panelAt = n => () => [...document.querySelectorAll('main section.panel')].filter(visible)[n];
+  // panneau dont le titre est ce texte (pris dans la langue affichée) ; « Livraisons à régler (1) » compte aussi
+  const panelBy = key => () => { const t = key(L()); return [...document.querySelectorAll('main section.panel')].find(p => visible(p) && (txt => txt === t || txt?.startsWith(`${t} (`))(p.querySelector(':scope > .panel-title h2')?.textContent)); };
+  const panelUntitled = () => [...document.querySelectorAll('main section.panel')].find(p => visible(p) && !p.querySelector(':scope > .panel-title'));
+
+  // Visite complète : une page = un chapitre ; chaque étape vise un tableau, une liste ou un bouton précis
+  const PAGES = [
+    ['home', '#/', 'home', [['figures', '.figures'], ['todo', '.todo'], ['recent', panelBy(l => l.recent)], ['timing', panelBy(l => l.e0)], ['add', ['.side .add-big', '.bottom .add-tab']],
+      ['nav', ['.side nav', '.bottom']], ['search', ['.searchbox', '.search-btn']]]],
+    ['stock', '#/stock', 'stock', [['filters', 'main .chips'], ['card', 'main .cards .card'], ['tag', 'main .cards .card .tag'], ['costs', '.page-head .cost-toggle']]],
+    ['piece', () => `#/piece/${tourPiece()}`, 'tag', [['head', '.piece-head'], ['actions', ['.piece-head .row.no-print', '.piece-head']], ['listings', panelBy(l => l.piece.channels)],
+      ['text', panelBy(l => l.piece.listingText)], ['vat', [panelBy(l => l.piece.fiscal), '.piece-head']], ['history', panelBy(l => l.piece.history)]]],
+    ['add', () => (tourDraft() ? `#/add/${tourDraft()}` : '#/stock'), 'camera', [['wizard', ['main .wiz', 'main form', 'main .page-head']], ['next', ['.wiz-nav', 'main .btn.primary']]]],
+    ['listings', '#/listings', 'listings', [['ig', '.ig-head'], ['post', '.ig-post'], ['remove', panelBy(l => l.listings.toRemove)], ['publish', panelBy(l => l.listings.toPublish)], ['import', panelBy(l => l.listings.importT)], ['replies', panelBy(l => l.listings.replies)]]],
+    ['scan', '#/scan', 'scan', [['steps', '.scan-steps'], ['sources', '.scan-sources', '#/scan?demo=1'], ['text', '.scan-text']]],
+    ['sell', () => `#/sell/${tourPiece()}`, 'sales', [['who', panelBy(l => l.sell.who)], ['deliv', panelBy(l => l.deliv.choose)], ['price', panelBy(l => l.sell.price)], ['pay', panelBy(l => l.sell.how)], ['confirm', 'main form button[type="submit"]']]],
+    ['sales', '#/sales', 'sales', [['filters', 'main .chips'], ['list', 'main .list']]],
+    ['sale', () => `#/sale/${tourSale()}`, 'print', [['invoice', 'main .invoice'], ['actions', ['.page-head .row', '.mobile-actions']], ['delivery', [panelBy(l => l.deliv.title), 'main .invoice']], ['payments', panelBy(l => l.nav.payments)], ['peppol', [panelBy(l => l.sales.peppol), panelBy(l => l.acc.title)]]]],
+    ['deliveries', '#/deliveries', 'truck', [['failed', panelBy(l => l.deliv.failed)], ['upcoming', panelBy(l => l.deliv.upcoming)], ['edit', '.deliv-acts .btn.primary']]],
+    ['customers', '#/customers', 'user', [['list', 'main .list'], ['filters', 'main .chips'], ['scan', '.page-head .btn.tagged'], ['ig', panelBy(l => l.cust.igT)]]],
+    ['customer', () => `#/customer/${tourCustomer()}`, 'user', [['form', 'main .grid2'], ['status', 'main .choices'], ['addresses', ['main section.panel .sub-panel', panelUntitled]], ['purchases', panelBy(l => l.cust.sales)]]],
+    ['payments', '#/payments', 'payments', [['feed', panelUntitled], ['match', 'main .list .btn.primary'], ['promised', panelBy(l => l.dep.list)], ['sources', panelBy(l => l.payments.sources)]]],
+    ['accounting', '#/accounting', 'accounting', [['software', panelBy(l => l.acc.link)], ['peppol', panelBy(l => l.acc.peppolT)], ['registers', panelBy(l => l.acc.registers)]]],
+    ['consign', '#/consign', 'consign', [['depositor', panelAt(0)]]],
+    ['brocante', '#/brocante', 'tent', [['stand', panelBy(l => l.broc.title)], ['owner', panelBy(l => l.broc.toGive)], ['sales', panelBy(l => l.sales.title)]]],
+    ['settings', '#/settings', 'settings', [['guide', panelBy(l => l.full.settingsT)], ['themes', '.themes'], ['reset', 'main .btn.danger']]],
+  ];
+  const FULL = [{ key: 'welcome', route: '#/', icon: 'guide' },
+    ...PAGES.flatMap(([page, route, ic, steps], ch) => steps.map(([k, sel, tryRoute]) => ({ key: `${page}.${k}`, page, ch, route, icon: ic, try: tryRoute,
+      sel: typeof sel === 'function' ? [sel] : Array.isArray(sel) ? sel : [sel] }))),
+    { key: 'end', route: '#/', icon: 'check' }];
+  const TOURS = {
+    full: { steps: FULL, chapters: PAGES.map(([k, , ic]) => [k, ic]), text: l => l.full.steps, chName: (l, k) => l.full.pages[k], count: (l, i, n, name) => l.full.page(i, n, name) },
+    story: { steps: TOUR, chapters: CHAPTERS, text: l => l.tour.steps, chName: (l, k) => l.tour.chapters[k][0], count: (l, i, n, name) => l.tour.chapter(i, n, name) },
+  };
+  const pageOf = hash => { const p = hash.replace(/^#\/?/, '').split(/[/?]/)[0]; return p === '' ? 'home' : p; };
+  const stepRoute = st => (typeof st.route === 'function' ? st.route() : st.route);
+  const stepSel = st => (typeof st.sel === 'function' ? st.sel() : st.sel);
+  let tour = null;  // { kind, steps, i, root, spot, card } tant que la visite est ouverte
+  const visible = el => { if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden'; };
+  const findEl = sels => (sels || []).map(s => (typeof s === 'function' ? [s()].filter(visible)[0] : [...document.querySelectorAll(s)].find(visible))).find(Boolean) || null;
+  function waitFor(sels, ms = 1600) {
+    return new Promise(res => {
+      const t0 = Date.now();
+      const look = () => { const el = findEl(sels); if (el || !sels || Date.now() - t0 > ms) res(el); else setTimeout(look, 60); };
+      look();
+    });
+  }
+  // kind : 'full', 'story' ou 'page' (les étapes de la page affichée, puis « Page suivante » enchaîne sur la visite complète)
+  function startTour(kind = 'full', i = 0) {
+    let def = TOURS[kind], steps = def?.steps;
+    if (kind === 'page') {
+      const page = pageOf(location.hash);
+      def = TOURS.full;
+      steps = FULL.filter(st => st.page === page).map(st => ({ ...st, route: location.hash }));  // la page affichée, pas une autre pièce
+      if (!steps.length) { startTour('full', 0); return; }
+    }
+    endTour(false);
+    const spot = h('div', { class: 'tour-spot', 'aria-hidden': 'true' });
+    const card = h('div', { class: 'tour-card', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'tour-title' });
+    const root = h('div', { class: 'tour', onclick: e => { if (e.target === root) nextStep(1); } }, spot, card);
+    document.body.append(root);
+    document.addEventListener('keydown', tourKeys);
+    window.addEventListener('resize', placeTour);
+    window.addEventListener('scroll', placeTour, true);
+    const app = document.getElementById('app');
+    tour = { kind, def, steps, i, root, spot, card, target: null, back: document.activeElement };
+    app.inert = true; app.setAttribute('aria-hidden', 'true');
+    try { sessionStorage.setItem(GUIDE_SESSION, '1'); } catch { /* sans stockage : proposée à chaque chargement */ }
+    showStep(i);
+  }
+  function endTour(done) {
+    if (!tour) return;
+    const back = tour.back;
+    tour.root.remove(); tour = null;
+    const app = document.getElementById('app'); app.inert = false; app.removeAttribute('aria-hidden');
+    if (back && back.isConnected) back.focus({ preventScroll: true });
+    document.removeEventListener('keydown', tourKeys);
+    window.removeEventListener('resize', placeTour);
+    window.removeEventListener('scroll', placeTour, true);
+    if (done) { try { localStorage.setItem(TOUR_KEY, 'done'); } catch { /* stockage bloqué : la visite pourra revenir */ } }
+  }
+  function tourKeys(e) {
+    if (!tour) return;
+    if (e.key === 'Escape') endTour(true);
+    else if (e.key === 'ArrowRight') nextStep(1);
+    else if (e.key === 'ArrowLeft') nextStep(-1);
+  }
+  // index de la première étape de la page suivante dans la visite complète (après une visite « cette page »)
+  const nextPageStart = page => { const k = PAGES.findIndex(([p]) => p === page); const nxt = PAGES[k + 1]?.[0]; return nxt ? FULL.findIndex(st => st.page === nxt) : -1; };
+  function nextStep(delta) {
+    if (!tour) return;
+    const i = tour.i + delta;
+    if (i < 0) return;
+    if (i >= tour.steps.length) {
+      if (tour.kind === 'page') { const at = nextPageStart(tour.steps[0].page); endTour(true); if (at > 0) startTour('full', at); return; }
+      endTour(true); go('#/'); return;
+    }
+    showStep(i);
+  }
+  async function showStep(i) {
+    const t = tour, l = L(), { def, steps, kind } = t, step = steps[i], txt = def.text(l)[step.key] || ['', ''];
+    t.i = i;
+    const route = stepRoute(step);
+    if (location.hash !== route && !(route === '#/' && ['', '#', '#/'].includes(location.hash))) {
+      location.replace(route);  // pas d'historique : « Retour » après la visite ne rejoue pas ses pages
+      await new Promise(r => setTimeout(r, 150));  // laisse le nouvel écran se dessiner : sinon on viserait un élément de l'ancien
+    }
+    const el = await waitFor(stepSel(step));
+    if (tour !== t || t.i !== i) return;
+    tour.target = el;
+    // téléphone : l'élément remonte en haut de l'écran, la carte reste en bas et ne le cache pas
+    const phone = innerWidth < 700;
+    // défilement immédiat : avec un défilement animé, le projecteur se plaçait parfois avant la fin et visait à côté
+    if (el) { el.style.scrollMarginTop = phone ? '72px' : ''; el.scrollIntoView({ block: phone ? 'start' : 'center', behavior: 'auto' }); }
+    const last = i === steps.length - 1, first = i === 0;
+    const chs = def.chapters, inCh = steps.filter(t => t.ch === step.ch), pos = inCh.indexOf(step);
+    // barre en segments, un par chapitre (ou par page) : on voit où on en est
+    const bars = kind === 'page' ? null : h('div', { class: 'tour-chapters', style: `grid-template-columns:repeat(${chs.length}, 1fr)`, 'aria-hidden': 'true' }, chs.map((c, k) => {
+      const all = steps.filter(t => t.ch === k), done = step.ch == null ? (last ? all.length : 0) : k < step.ch ? all.length : k === step.ch ? pos + 1 : 0;
+      return h('span', { class: k === step.ch ? 'on' : '' }, h('i', { style: `width:${Math.round((done / Math.max(1, all.length)) * 100)}%` }));
+    }));
+    const map = (first || last) && kind !== 'page' ? h('ol', { class: `tour-map${chs.length > 6 ? ' many' : ''}` }, chs.map(([k, ic], n) => h('li', {}, h('span', { class: 'tour-badge' }, icon(ic)),
+      h('span', {}, h('b', { text: `${n + 1}. ${def.chName(l, k)}` }), kind === 'story' ? h('small', { text: l.tour.chapters[k][1] }) : null)))) : null;
+    const countText = step.ch != null ? def.count(l, step.ch + 1, chs.length, def.chName(l, chs[step.ch][0])) : l.tour.count(i + 1, steps.length);
+    const nextLabel = last ? (kind === 'page' && nextPageStart(step.page) > 0 ? l.full.nextPage(def.chName(l, PAGES[PAGES.findIndex(([p]) => p === step.page) + 1][0])) : l.tour.finish)
+      : first && kind === 'full' ? l.full.start : first && kind === 'story' ? l.tour.start : l.tour.next;
+    fill(tour.card,
+      bars,
+      h('div', { class: 'tour-top' }, h('span', { class: 'tour-badge' }, icon(step.icon)),
+        h('span', { class: 'tour-count', text: kind === 'page' ? l.full.thisPage(def.chName(l, chs[step.ch][0])) : countText }),
+        inCh.length > 1 && step.ch != null ? h('span', { class: 'tour-sub', text: `${pos + 1}/${inCh.length}` }) : null),
+      h('h2', { id: 'tour-title', tabindex: '-1', text: txt[0] }),
+      h('p', { id: 'tour-text', text: txt[1] }),
+      txt[2] ? h('p', { class: 'tour-do' }, icon('check'), h('span', { text: txt[2] })) : null,
+      map,
+      first && kind === 'full' ? btn(l.full.short, () => startTour('story', 1), 'small', 'guide') : null,
+      step.try ? btn(l.tour.try, () => { endTour(true); go(step.try); }, 'small tagged', 'image') : null,
+      h('div', { class: 'tour-nav' },
+        last ? null : btn(first ? l.tour.later : l.tour.skip, () => endTour(!first), 'small'),
+        i > 0 ? btn(l.tour.prev, () => nextStep(-1), 'small', 'back') : null,
+        btn(nextLabel, () => nextStep(1), 'primary', last ? 'check' : null)));
+    tour.card.classList.remove('enter'); void tour.card.offsetWidth; tour.card.classList.add('enter');
+    tour.root.classList.toggle('no-target', !el);
+    placeTour(); setTimeout(placeTour, 120); setTimeout(placeTour, 600);  // après le dessin de la carte, puis après le chargement des images
+    tour.card.setAttribute('aria-describedby', 'tour-text');
+    tour.card.querySelector('h2')?.focus({ preventScroll: true });  // le lecteur d'écran annonce le titre puis le texte de l'étape
+  }
+  window.EtiketTour = { start: startTour, state: () => (tour ? { kind: tour.kind, i: tour.i, total: tour.steps.length, key: tour.steps[tour.i].key, target: !!tour.target,
+      what: tour.target ? tour.target.querySelector(':scope > .panel-title h2')?.textContent || tour.target.className : null } : null),
+    keys: () => FULL.map(st => st.key) };  // pour les tests de bout en bout
+  // mode démo guidée : la visite complète se propose une fois par session, tant que le mode reste actif
+  function maybeStartGuide(delay = 450) {
+    let shown = false; try { shown = sessionStorage.getItem(GUIDE_SESSION) === '1'; } catch { shown = false; }
+    let seen = false; try { seen = localStorage.getItem(TOUR_KEY) === 'done'; } catch { seen = false; }
+    if (!shown && (P.guide || !seen)) setTimeout(() => { if (!tour && session.on()) startTour('full', 0); }, delay);
+  }
+  function placeTour() {
+    if (!tour) return;
+    if (tour.target && !tour.target.isConnected) tour.target = findEl(stepSel(tour.steps[tour.i]));
+    const { spot, card, target } = tour;
+    const vw = innerWidth, vh = innerHeight, pad = 8;
+    if (!target || !visible(target)) { spot.style.cssText = `top:${vh / 2}px;left:${vw / 2}px;width:0;height:0`; card.style.cssText = ''; card.classList.add('center'); return; }
+    card.classList.remove('center');
+    const r = target.getBoundingClientRect();
+    const top = Math.max(4, r.top - pad), left = Math.max(4, r.left - pad);
+    const w = Math.min(vw - left - 4, r.width + pad * 2), hh = Math.min(vh - top - 4, r.height + pad * 2);
+    spot.style.cssText = `top:${top}px;left:${left}px;width:${w}px;height:${hh}px`;
+    const cw = Math.min(400, vw - 24), ch = card.offsetHeight || 220;
+    if (vw < 700) {  // téléphone : la carte en bas ; l'éclairage s'arrête au-dessus d'elle (en haut seulement si l'élément est tout en bas)
+      const bottom = r.top < vh - ch - 40;
+      card.style.cssText = bottom ? 'left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom))' : 'left:12px;right:12px;top:12px';
+      if (bottom) spot.style.height = `${Math.max(40, Math.min(hh, vh - ch - 32 - top))}px`;
+      return;
+    }
+    let ct = r.bottom + 16, cl = Math.min(Math.max(12, r.left), vw - cw - 12);
+    if (ct + ch > vh - 12) ct = r.top - ch - 16;
+    if (ct < 12) {  // ni dessous ni dessus : la carte se met à côté de l'élément plutôt que dessus
+      ct = Math.min(Math.max(12, r.top + r.height / 2 - ch / 2), vh - ch - 12);
+      if (r.right + 16 + cw <= vw - 12) cl = r.right + 16;
+      else if (r.left - 16 - cw >= 12) cl = r.left - 16 - cw;
+      else ct = Math.max(12, vh - ch - 12);
+    }
+    card.style.cssText = `top:${ct}px;left:${cl}px;width:${cw}px`;
+  }
+
   /* ---------- Mode d'emploi : le parcours d'une pièce ---------- */
   let guideTrack = 'pro';
   function viewGuide() {
@@ -1553,7 +2052,13 @@
     };
     paint();
     if (!S.guideSeen) { S.guideSeen = true; save(); }
-    return [head(g.title, g.intro), segBox, tracks];
+    return [head(g.title, g.intro),
+      h('section', { class: 'tour-hero' }, h('div', { class: 'tour-hero-art', 'aria-hidden': 'true' }, h('span', { class: 'tag' }, h('span', { class: 'no', text: '101' }), h('span', { class: 'price', text: '1 450 €' })),
+        h('span', { class: 'tour-hero-ring' })),
+        h('div', { class: 'stack' }, h('h2', { text: l.tour.heroTitle }), h('p', { text: l.tour.heroText }),
+          h('div', { class: 'row' }, btn(l.full.launch, () => startTour('full', 0), 'primary big', 'guide'), btn(l.full.short, () => startTour('story', 0), '', 'tag'),
+            h('span', { class: 'muted', text: l.full.duration })))),
+      segBox, tracks];
   }
 
   /* ---------- Réglages ---------- */
@@ -1563,6 +2068,15 @@
     return [
       head(l.settings.title, null, btn(l.login.logout, () => { session.set(false); location.hash = '#/login'; render(); }, '', 'close')),
       h('div', { class: 'stack' },
+        panel(l.full.settingsT, pill(P.guide ? 'live' : 'none', P.guide ? l.full.on : l.full.off),
+          h('label', { class: 'switch big-switch' }, h('input', { type: 'checkbox', checked: P.guide, onchange: e => { P.guide = e.target.checked; savePrefs(); render(); toast(P.guide ? l.full.onToast : l.full.offToast); } }),
+            h('span', { text: l.full.toggle })),
+          h('p', { class: 'hint', text: l.full.settingsHint }),
+          h('div', { class: 'row' }, btn(l.full.launch, () => startTour('full', 0), 'primary', 'guide'), btn(l.full.short, () => startTour('story', 0), '', 'tag')),
+          h('hr', { class: 'sep' }),
+          h('label', { class: 'switch big-switch' }, h('input', { type: 'checkbox', checked: P.costs, onchange: e => { P.costs = e.target.checked; savePrefs(); render(); } }),
+            h('span', { text: l.costs.toggle })),
+          h('p', { class: 'hint', text: l.costs.only })),
         panel(l.settings.look, null, h('p', { class: 'muted', style: 'margin-bottom:12px', text: l.settings.lookHint }),
           h('div', { class: 'themes' }, Object.keys(THEME_SW).map(k => h('button', { type: 'button', class: 'theme-card', 'aria-pressed': String(P.theme === k), onclick: () => { P.theme = k; savePrefs(); applyPrefs(); render(); } },
             h('span', { class: 'swatch' }, THEME_SW[k].map(c => h('i', { style: `background:${c}` }))), h('b', { text: l.settings.themes[k][0] }), h('span', { class: 'muted', text: l.settings.themes[k][1] }))))),
@@ -1596,7 +2110,7 @@
       '': ['home', () => viewHome()], stock: ['stock', () => viewStock(q)], piece: ['stock', () => viewPiece(b)], add: ['add', () => viewAdd(b)],
       sell: ['sales', () => viewSell(b, q)], sales: ['sales', () => viewSales(q)], sale: ['sales', () => viewSale(b)], payments: ['payments', () => viewPayments(q)],
       listings: ['listings', () => viewListings()], accounting: ['accounting', () => viewAccounting()], consign: ['consign', () => viewConsign()], settings: ['settings', () => viewSettings()],
-      deliveries: ['deliveries', () => viewDeliveries()], customers: ['customers', () => viewCustomers(q)], customer: ['customers', () => viewCustomer(b)], brocante: ['brocante', () => viewBrocante(q)], scan: ['scan', () => viewScan()], guide: ['guide', () => viewGuide()],
+      deliveries: ['deliveries', () => viewDeliveries()], customers: ['customers', () => viewCustomers(q)], customer: ['customers', () => viewCustomer(b)], brocante: ['brocante', () => viewBrocante(q)], scan: ['scan', () => viewScan(q)], guide: ['guide', () => viewGuide()],
     };
     const [section, view] = routes[a] || routes[''];
     const content = view();
@@ -1605,6 +2119,7 @@
     app.replaceChildren(shell(section, content));
     document.title = `${document.querySelector('main h1')?.textContent || 'Etiket'} — Etiket`;
     if (!first && renderReason === 'nav') { window.scrollTo(0, 0); document.querySelector('main h1')?.focus({ preventScroll: true }); } else window.scrollTo(0, y);
+    if (first) maybeStartGuide(900);  // app rouverte avec une session déjà ouverte
     renderReason = 'update'; first = false;
   }
   window.addEventListener('hashchange', () => { renderReason = 'nav'; render(); });

@@ -1,0 +1,123 @@
+/* Scan en trois étapes (source, lecture, vérification), dictée, liens Instagram, visite guidée en chapitres. [RELECTURE NL]
+   Fusion en profondeur : seules les clés ci-dessous changent, les autres textes restent ceux de i18n-guide.js. */
+(function () {
+  const add = {
+    fr: {
+      scanx: {
+        steps: ['Capture', 'Lecture', 'Vérification'],
+        pick: 'Choisir une capture d’écran', pickHint: 'ou glissez-la ici, ou Ctrl + V',
+        pasteAny: 'Coller (capture ou texte)', sample: 'Essayer avec un exemple',
+        textLabel: 'Texte de la conversation', textHint: 'Rempli par la lecture de la capture. Vous pouvez aussi l’écrire ou le dicter, puis « Analyser ».',
+        reading: 'Lecture de la capture', shotAlt: 'Capture en cours de lecture',
+        stage: { load: 'Préparation du lecteur de texte…', prep: 'Préparation de l’image…', read: 'Lecture du texte…' },
+        loadHint: 'La première fois seulement : environ 10 Mo à télécharger, puis tout se passe sur l’appareil.',
+        pass: (i, n) => `Passage ${i} sur ${n} : ${i === 1 ? 'texte foncé' : 'bulles claires du mode sombre'}`,
+        cancel: 'Arrêter', stopped: 'Lecture arrêtée.',
+        doneIn: (s, n) => `Capture lue en ${s} s : ${n} caractères`,
+        editHint: 'Écrivez, collez ou dictez le message du client, puis « Analyser ».',
+      },
+      voice: {
+        start: 'Dicter', stop: 'Arrêter la dictée', listening: 'J’écoute… parlez normalement.',
+        none: 'Dictée indisponible dans ce navigateur : utilisez le micro du clavier du téléphone.',
+        denied: 'Micro refusé : autorisez-le dans le navigateur, ou utilisez le micro du clavier.',
+        silence: 'Je n’ai rien entendu. Réessayez plus près du micro.', fail: 'La dictée n’a pas marché. Utilisez le micro du clavier.',
+        privacy: 'La dictée du navigateur passe par le service de reconnaissance de Google (Chrome) ou d’Apple (Safari). Le micro du clavier du téléphone fait la même chose.',
+      },
+      verify: {
+        title: 'Vérifiez avant de reprendre', hint: 'Cochez ce qui doit être repris. Tout reste modifiable ; un champ vide peut être complété ici.',
+        ok: 'valide', empty: 'à compléter si besoin', nothing: 'Rien n’est coché : complétez au moins un champ.',
+        bad: { name: 'nom trop court', phone: 'numéro belge incomplet', email: 'adresse e-mail incomplète', handle: '@compte non valide', address: 'rue, numéro, code postal à 4 chiffres et commune', amount: 'montant non valide' },
+        sum: (k, b) => (b ? `${k} information${k > 1 ? 's' : ''} cochée${k > 1 ? 's' : ''}, ${b} à corriger` : `${k} information${k > 1 ? 's' : ''} prête${k > 1 ? 's' : ''} à reprendre`),
+        blocked: 'Corrigez les champs en rouge, ou décochez-les, pour continuer.',
+        keep: label => `Reprendre : ${label}`, others: 'Aussi lu :', price: 'Prix convenu (€)', ph: { name: 'Prénom et nom' },
+      },
+      igx: { seePost: 'Voir la publication sur Instagram', seeProfile: hd => `Voir le profil @${hd}`, seeCustomer: hd => `Voir le profil ${hd} sur Instagram` },
+      tour: {
+        launch: 'Visite guidée', start: 'Commencer la visite', later: 'Plus tard', finish: 'C’est parti', try: 'Essayer avec une capture d’exemple',
+        duration: '2 minutes, 5 chapitres : l’histoire d’une pièce.',
+        chapter: (i, n, name) => `Chapitre ${i} sur ${n} · ${name}`,
+        chapters: {
+          receive: ['Recevoir une pièce', 'Instagram, stock, fiche'], sell: ['La vendre', 'conversation scannée, message au client'],
+          deliver: ['La livrer', 'date, créneau, adresse'], money: ['Encaisser et déclarer', 'paiements, TVA sur la marge'], daily: ['Au quotidien', 'à faire, bouton +, famille'],
+        },
+        heroTitle: 'Première visite ? Suivez une pièce de A à Z', heroText: 'La visite passe d’écran en écran et éclaire, à chaque fois, l’endroit où appuyer. 5 chapitres, 2 minutes.',
+        steps: {
+          welcome: ['Bienvenue dans Etiket', 'On va suivre une pièce de bout en bout : publiée sur Instagram, vendue à un client qui écrit, livrée, encaissée et déclarée. Les clients et l’argent sont fictifs.'],
+          instagram: ['Vous publiez sur Instagram…', '… et la publication arrive ici. La légende est lue : titre, prix, dimensions.', 'À faire : « Créer la fiche ».'],
+          stock: ['… la pièce est en stock', 'Chaque pièce a son étiquette kraft. Son numéro est aussi celui du registre de la marge.', 'À faire : ouvrir une pièce.'],
+          piece: ['La fiche de la pièce', 'Prix, état, provenance, annonces, texte FR/NL prêt à copier, et la TVA due si elle se vend à ce prix.'],
+          scanBtn: ['Un client écrit sur WhatsApp ou Instagram', 'Faites une capture de la conversation, puis appuyez ici.', 'À faire : « Un client a écrit ? Scanner la conversation ».'],
+          scan: ['L’app lit la capture pour vous', 'Une barre montre la lecture. Ensuite, le nom, le téléphone, l’adresse et le prix convenu sont proposés : vous vérifiez, corrigez ou dictez ce qui manque.', 'Essayez avec l’exemple ci-dessous.'],
+          send: ['Vous confirmez au client', 'Le message est prêt selon la situation : achat, acompte, livraison. Il s’ouvre dans WhatsApp, SMS, Instagram ou e-mail ; rien ne part sans vous.'],
+          delivery: ['Le client change le rendez-vous', '« Plutôt samedi entre 14h et 16h » : collez, scannez ou dictez son message. La date, le créneau et l’adresse se remplissent.'],
+          payments: ['L’argent arrive', 'Bancontact, liens de paiement et virements se rangent avec la bonne vente grâce à la communication structurée.'],
+          vat: ['La TVA sur la marge se fait seule', 'Registres et grilles 00, 03 et 54 sont tenus à chaque vente ; export ou envoi direct à la compta.'],
+          todo: ['Chaque matin : « À faire maintenant »', 'Livraisons ratées, nouvelles publications, acomptes promis… Un clic mène à l’écran concerné.'],
+          plus: ['Le bouton +', 'Les gestes de tous les jours, depuis le téléphone : ajouter une pièce, scanner une conversation, vendre.'],
+          family: ['Le stand de la famille', 'Les objets personnels de la famille se vendent à part : pas de facture, pas de TVA, et la somme à remettre à chacun.'],
+          end: ['C’est à vous', 'Le plus utile pour commencer : scanner une vraie conversation de client. La visite se relance depuis « Mode d’emploi ».'],
+        },
+      },
+    },
+    nl: {
+      scanx: {
+        steps: ['Screenshot', 'Lezen', 'Controle'],
+        pick: 'Een screenshot kiezen', pickHint: 'of sleep het hierheen, of Ctrl + V',
+        pasteAny: 'Plakken (screenshot of tekst)', sample: 'Proberen met een voorbeeld',
+        textLabel: 'Tekst van het gesprek', textHint: 'Ingevuld door het lezen van het screenshot. U kunt het ook typen of inspreken en dan « Analyseren ».',
+        reading: 'Screenshot lezen', shotAlt: 'Screenshot dat gelezen wordt',
+        stage: { load: 'Tekstlezer voorbereiden…', prep: 'Afbeelding voorbereiden…', read: 'Tekst lezen…' },
+        loadHint: 'Alleen de eerste keer: ongeveer 10 MB downloaden, daarna gebeurt alles op het toestel.',
+        pass: (i, n) => `Ronde ${i} van ${n}: ${i === 1 ? 'donkere tekst' : 'lichte ballonnen van de donkere modus'}`,
+        cancel: 'Stoppen', stopped: 'Lezen gestopt.',
+        doneIn: (s, n) => `Screenshot gelezen in ${s} s: ${n} tekens`,
+        editHint: 'Typ, plak of spreek het bericht van de klant in en druk op « Analyseren ».',
+      },
+      voice: {
+        start: 'Inspreken', stop: 'Stoppen met inspreken', listening: 'Ik luister… spreek gewoon.',
+        none: 'Inspreken niet beschikbaar in deze browser: gebruik de microfoon van het toetsenbord.',
+        denied: 'Microfoon geweigerd: sta hem toe in de browser, of gebruik de microfoon van het toetsenbord.',
+        silence: 'Ik hoorde niets. Probeer dichter bij de microfoon.', fail: 'Inspreken lukte niet. Gebruik de microfoon van het toetsenbord.',
+        privacy: 'Inspreken in de browser gaat via de spraakherkenning van Google (Chrome) of Apple (Safari). De microfoon van het toetsenbord doet hetzelfde.',
+      },
+      verify: {
+        title: 'Controleer voor u overneemt', hint: 'Vink aan wat overgenomen moet worden. Alles blijft aanpasbaar; een leeg veld kunt u hier invullen.',
+        ok: 'geldig', empty: 'invullen indien nodig', nothing: 'Niets aangevinkt: vul minstens één veld in.',
+        bad: { name: 'naam te kort', phone: 'Belgisch nummer onvolledig', email: 'e-mailadres onvolledig', handle: '@account ongeldig', address: 'straat, nummer, postcode van 4 cijfers en gemeente', amount: 'ongeldig bedrag' },
+        sum: (k, b) => (b ? `${k} gegeven${k > 1 ? 's' : ''} aangevinkt, ${b} te verbeteren` : `${k} gegeven${k > 1 ? 's' : ''} klaar om over te nemen`),
+        blocked: 'Verbeter de rode velden, of vink ze uit, om verder te gaan.',
+        keep: label => `Overnemen: ${label}`, others: 'Ook gelezen:', price: 'Afgesproken prijs (€)', ph: { name: 'Voornaam en naam' },
+      },
+      igx: { seePost: 'De post op Instagram bekijken', seeProfile: hd => `Het profiel @${hd} bekijken`, seeCustomer: hd => `Het profiel ${hd} op Instagram bekijken` },
+      tour: {
+        launch: 'Rondleiding', start: 'Rondleiding starten', later: 'Later', finish: 'Aan de slag', try: 'Proberen met een voorbeeldscreenshot',
+        duration: '2 minuten, 5 hoofdstukken: het verhaal van een stuk.',
+        chapter: (i, n, name) => `Hoofdstuk ${i} van ${n} · ${name}`,
+        chapters: {
+          receive: ['Een stuk ontvangen', 'Instagram, voorraad, fiche'], sell: ['Het verkopen', 'gescand gesprek, bericht aan de klant'],
+          deliver: ['Het leveren', 'datum, tijdslot, adres'], money: ['Innen en aangeven', 'betalingen, btw op de marge'], daily: ['Elke dag', 'te doen, knop +, familie'],
+        },
+        heroTitle: 'Eerste bezoek? Volg een stuk van A tot Z', heroText: 'De rondleiding gaat van scherm naar scherm en toont telkens waar u moet drukken. 5 hoofdstukken, 2 minuten.',
+        steps: {
+          welcome: ['Welkom bij Etiket', 'We volgen één stuk van begin tot eind: gepost op Instagram, verkocht aan een klant die schrijft, geleverd, betaald en aangegeven. Klanten en bedragen zijn fictief.'],
+          instagram: ['U post op Instagram…', '… en de post komt hier binnen. Het bijschrift wordt gelezen: titel, prijs, afmetingen.', 'Te doen: « Fiche aanmaken ».'],
+          stock: ['… het stuk staat in voorraad', 'Elk stuk heeft zijn kraftetiket. Het nummer is ook dat van het margeregister.', 'Te doen: een stuk openen.'],
+          piece: ['De fiche van het stuk', 'Prijs, staat, herkomst, zoekertjes, tekst in FR/NL klaar om te kopiëren, en de btw als het aan die prijs verkocht wordt.'],
+          scanBtn: ['Een klant schrijft op WhatsApp of Instagram', 'Maak een screenshot van het gesprek en druk hier.', 'Te doen: « Heeft een klant geschreven? Gesprek scannen ».'],
+          scan: ['De app leest het screenshot voor u', 'Een balk toont het lezen. Daarna worden naam, telefoon, adres en afgesproken prijs voorgesteld: u controleert, verbetert of spreekt in wat ontbreekt.', 'Probeer het met het voorbeeld hieronder.'],
+          send: ['U bevestigt aan de klant', 'Het bericht is klaar volgens de situatie: aankoop, voorschot, levering. Het opent in WhatsApp, sms, Instagram of e-mail; niets vertrekt zonder u.'],
+          delivery: ['De klant verzet de afspraak', '« Liever zaterdag tussen 14u en 16u »: plak, scan of spreek zijn bericht in. Datum, tijdslot en adres worden ingevuld.'],
+          payments: ['Het geld komt binnen', 'Bancontact, betaallinks en overschrijvingen komen bij de juiste verkoop dankzij de gestructureerde mededeling.'],
+          vat: ['Btw op de marge gaat vanzelf', 'Registers en roosters 00, 03 en 54 worden bij elke verkoop bijgehouden; export of rechtstreeks naar de boekhouding.'],
+          todo: ['Elke ochtend: « Nu te doen »', 'Mislukte leveringen, nieuwe posts, beloofde voorschotten… Eén klik brengt u naar het juiste scherm.'],
+          plus: ['De knop +', 'De dagelijkse handelingen, vanaf de telefoon: een stuk toevoegen, een gesprek scannen, verkopen.'],
+          family: ['De stand van de familie', 'Persoonlijke voorwerpen van de familie worden apart verkocht: geen factuur, geen btw, en het bedrag voor elke eigenaar.'],
+          end: ['Aan u', 'Het nuttigste om te beginnen: een echt gesprek met een klant scannen. De rondleiding start opnieuw vanuit « Handleiding ».'],
+        },
+      },
+    },
+  };
+  const plain = v => v && typeof v === 'object' && !Array.isArray(v);
+  const merge = (base, v) => { for (const [k, x] of Object.entries(v)) base[k] = plain(x) && plain(base[k]) ? merge(base[k], x) : x; return base; };
+  for (const lang of ['fr', 'nl']) merge(window.I18N[lang], add[lang]);
+})();

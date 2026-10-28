@@ -274,7 +274,56 @@ ${lines.map(l => `  <cac:InvoiceLine><cbc:ID>${l.n}</cbc:ID><cbc:InvoicedQuantit
       .filter(m => !/\b(?:pas|niet|not|no)\s*$/i.test(t.slice(Math.max(0, m.index - 8), m.index)));  // « pas ok pour… » n'est pas un accord
     const last = deals[deals.length - 1];
     const agreed = last ? Number(last[1].replace(/\D/g, '') + (last[2] ? `.${last[2]}` : '')) : null;
-    return { phones, emails, handles, addresses, amounts, agreed };
+    // nom : seulement après une formule explicite (« je m'appelle », « nom : », « mijn naam is »), jamais deviné dans le reste
+    const NAME = "[A-ZÀ-Ý][a-zà-ÿ'’-]+";
+    const names = uniq([...t.matchAll(new RegExp(String.raw`(?:[Jj]e m['’]appelle|[Mm]on nom (?:est|c['’]est)|\b[Nn]om\s*:|[Aa]u nom de|[Mm]ijn naam is|[Ii]k heet|\b[Nn]aam\s*:|[Oo]p naam van)\s+(${NAME}(?:[ -]${NAME})?)`, 'g'))].map(m => m[1]));
+    return { phones, emails, handles, addresses, amounts, agreed, names };
+  }
+
+  // Texte dicté (reconnaissance vocale) → texte lisible par parseContact : « arobase », « point com », majuscule de la commune
+  function fromSpeech(text) {
+    const dots = s => s.replace(/\s+(?:point|punt)\s+/gi, '.');
+    return String(text || '')
+      .replace(/\s*\b(?:underscore|tiret bas|liggend streepje)\b\s*/gi, '_')
+      .replace(/(\S+(?:\s+(?:point|punt)\s+\S+)*)\s+(?:arobase|apenstaartje)\s+(\S+(?:\s+(?:point|punt)\s+\S+)+)/gi, (m, a, b) => `${dots(a)}@${dots(b)}`)
+      .replace(/\b(?:arobase|apenstaartje)\s+/gi, '@')
+      .replace(/(@[\w.]+)\s+(?:point|punt)\s+(?=\w)/gi, '$1.')
+      .replace(/\b([a-zà-ÿ][a-zà-ÿ'’-]*(?:straat|laan|lei|steenweg|plein|weg|dreef|kaai|vest))\b/g, s => s[0].toUpperCase() + s.slice(1))
+      .replace(/(\b\d{4}\s+)([a-zà-ÿ])/g, (m, a, b) => a + b.toUpperCase())
+      // nom dit après « je m'appelle », « mijn naam is »… : la reconnaissance vocale le rend souvent en minuscules
+      .replace(/((?:je m['’]appelle|mon nom (?:est|c['’]est)|nom\s*:|au nom de|mijn naam is|ik heet|naam\s*:|op naam van)\s+)([a-zà-ÿ][a-zà-ÿ'’-]+)(?:([ -])([a-zà-ÿ][a-zà-ÿ'’-]+))?/gi,
+        (m, a, b, sep, c) => a + b[0].toUpperCase() + b.slice(1) + (c && !/^(?:et|en|and|mon|ma|mijn|je|ik)$/i.test(c) ? sep + c[0].toUpperCase() + c.slice(1) : sep && c ? sep + c : ''));
+  }
+
+  // Montant écrit à la belge (« 1 450 », « 1.450,00 », « 300,5 ») → nombre, ou NaN
+  function toAmount(v) {
+    if (typeof v === 'number') return v;
+    let s = String(v ?? '').replace(/[\s €]/g, '');
+    if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+    return /^\d+(\.\d+)?$/.test(s) ? Number(s) : NaN;
+  }
+
+  // Verdict d'un champ repris d'une conversation : 'ok', 'bad' (à corriger) ou 'empty'.
+  // Mêmes exigences que l'enregistrement : adresse = rue avec numéro, code postal à 4 chiffres, commune.
+  function checkField(kind, v) {
+    if (kind === 'address') {
+      const a = v || {};
+      if (![a.street, a.zip, a.city].some(x => String(x || '').trim())) return 'empty';
+      return /\p{L}{2}/u.test(a.street || '') && /\d/.test(a.street || '') && /^\d{4}$/.test(String(a.zip || '').trim()) && /\p{L}{2}/u.test(a.city || '') ? 'ok' : 'bad';
+    }
+    if (kind === 'amount') { if (v == null || String(v).trim() === '') return 'empty'; const n = toAmount(v); return n > 0 && n < 1e6 ? 'ok' : 'bad'; }
+    const s = String(v ?? '').trim();
+    if (!s) return 'empty';
+    if (kind === 'phone') {
+      const all = s.replace(/\(0\)/, '').replace(/\D/g, '');
+      if (/^\s*(?:\+|00)(?!32)/.test(s)) return all.length >= 9 && all.length <= 15 ? 'ok' : 'bad';  // numéro étranger : longueur plausible
+      const d = all.replace(/^0032/, '').replace(/^32/, '').replace(/^0/, '');
+      return (d.length === 9 && d[0] === '4') || (d.length === 8 && d[0] !== '4') ? 'ok' : 'bad';
+    }
+    if (kind === 'email') return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(s) ? 'ok' : 'bad';
+    if (kind === 'handle') return /^@?[A-Za-z0-9._]{1,30}$/.test(s) ? 'ok' : 'bad';
+    return /\p{L}{2}/u.test(s) ? 'ok' : 'bad';
   }
 
   /* ---------- Écrire au client depuis le téléphone ---------- */
@@ -319,6 +368,70 @@ ${lines.map(l => `  <cac:InvoiceLine><cbc:ID>${l.n}</cbc:ID><cbc:InvoicedQuantit
     return (MESSAGES[lang] || MESSAGES.fr)[kind](safe).replace(/[ \t]{2,}/g, ' ').replace(/ +([.,!?])/g, '$1').trim();
   };
 
-  return { CASH_LIMIT, MENTION, PRIVATE, matchCustomer, agreedPrice, contactLinks, message, round2, marginVat, regimeOf, consignment, saleTax, quarterOf, quarterGrids, cashCheck, missingFields,
+  /* ---------- Message de livraison (« samedi entre 14h et 16h, nouvelle adresse… ») → date, créneau, adresse ---------- */
+  const DAYS = { dimanche: 0, lundi: 1, mardi: 2, mercredi: 3, jeudi: 4, vendredi: 5, samedi: 6,
+    zondag: 0, maandag: 1, dinsdag: 2, woensdag: 3, donderdag: 4, vrijdag: 5, zaterdag: 6 };
+  const MONTHS = { janvier: 1, février: 2, fevrier: 2, mars: 3, avril: 4, mai: 5, juin: 6, juillet: 7, août: 8, aout: 8, septembre: 9, octobre: 10, novembre: 11, décembre: 12, decembre: 12,
+    januari: 1, februari: 2, maart: 3, april: 4, mei: 5, juni: 6, juli: 7, augustus: 8, september: 9, oktober: 10, november: 11, december: 12 };
+  const iso = d => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  const hhmm = (h, m) => `${String(h).padStart(2, '0')}:${String(m || 0).padStart(2, '0')}`;
+  function parseDelivery(text, today) {
+    const t = String(text || '').toLowerCase();
+    const base = new Date(`${today}T12:00:00Z`);
+    const plus = n => { const d = new Date(base); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
+    // une date passée de cette année (« le 12/01 » en octobre) désigne l'année suivante ; une année explicite dans le passé est ignorée
+    const ymd = (day, month, year) => {
+      if (!(day >= 1 && day <= 31 && month >= 1 && month <= 12)) return null;
+      const y = year ? (year < 100 ? 2000 + year : year) : base.getUTCFullYear();
+      let d = new Date(Date.UTC(y, month - 1, day, 12));
+      if (d.getUTCMonth() !== month - 1) return null;
+      if (iso(d) < today) { if (year) return null; d = new Date(Date.UTC(y + 1, month - 1, day, 12)); }
+      return iso(d);
+    };
+    // « 3/4 places », « 2-3 personnes », « 3.10 € » ou un morceau de numéro de téléphone ne sont pas des dates
+    const numericDate = () => {
+      for (const m of t.matchAll(/(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?/g)) {
+        const before = t.slice(Math.max(0, m.index - 1), m.index), after = t.slice(m.index + m[0].length);
+        if (/[\d/.-]/.test(before) || /^[\d/.-]/.test(after)) continue;
+        if (/^\s*(?:places?|pers|personnes?|personen|jours?|dagen|€|eur|euros?|cm|m\b|kg)/.test(after)) continue;
+        const d = ymd(Number(m[1]), Number(m[2]), m[3] && Number(m[3]));
+        if (d || m[3]) return d;
+      }
+      return null;
+    };
+    const named = t.match(new RegExp(`(?:^|[^\\d])(\\d{1,2})(?:er)?\\s+(${Object.keys(MONTHS).join('|')})(?![a-zà-ÿ])(?:\\s+(\\d{4}))?`));
+    const days = [...t.matchAll(new RegExp(`(?:^|[^a-zà-ÿ])(${Object.keys(DAYS).join('|')})(?=$|[^a-zà-ÿ]|avond|namiddag|middag|ochtend|voormiddag)`, 'g'))];
+    let date = null;
+    if (/après-demain|apres-demain|overmorgen/.test(t)) date = plus(2);
+    else if (/(?:^|[^a-zà-ÿ])demain(?![a-zà-ÿ])/.test(t) || /(?:^|[^a-zà-ÿ])morgen(?:ochtend|avond|namiddag|middag)?(?![a-zà-ÿ])/.test(t)) date = plus(1);
+    else if (/aujourd['’]hui|vandaag|ce soir|ce matin|cet après-midi|cet apres-midi|vanavond|vanochtend|vanmiddag|vannamiddag/.test(t)) date = plus(0);
+    else if (named) date = ymd(Number(named[1]), MONTHS[named[2]], named[3] && Number(named[3]));
+    if (!date && !named) date = numericDate();
+    if (!date && days.length) { const last = days[days.length - 1][1]; date = plus((DAYS[last] - base.getUTCDay() + 7) % 7 || 7); }  // « pas samedi, plutôt dimanche » : le dernier jour cité
+    // heures : un « h », « u », « uur » qui n'est pas le début d'un mot (« uitschuifbare », « Uccle »), entre 7 h et 22 h
+    const U = String.raw`(?:h|u|uur|:)(?![a-zà-ÿ])`;
+    const H = String.raw`(\d{1,2})\s*${U}\s*(\d{2})?`;
+    const ok = (hh, mm) => hh >= 7 && hh <= 22 && (!mm || Number(mm) < 60);
+    let slot = null;
+    const range = t.match(new RegExp(String.raw`(?:entre|tussen|de|van|from)\s+(\d{1,2})(?:\s*${U}\s*(\d{2})?)?\s*(?:et|en|à|a|-|–|tot|and)\s*${H}`))
+      || t.match(new RegExp(String.raw`${H}\s*(?:-|–|à|a|tot|et|en|>)\s*${H}`));
+    if (range) {
+      const [h1, m1, h2, m2] = [Number(range[1]), range[2], Number(range[3]), range[4]];
+      if (ok(h1, m1) && h2 <= 23 && h2 * 60 + Number(m2 || 0) > h1 * 60 + Number(m1 || 0)) slot = `${hhmm(h1, m1)}–${hhmm(h2, m2)}`;
+    }
+    if (!slot && !range) {
+      const single = t.match(new RegExp(String.raw`(?:vers|à|a|om|rond|pour|tegen)\s+${H}`)) || t.match(new RegExp(String.raw`(?:^|[^\d])${H}`));
+      if (single && ok(Number(single[1]), single[2])) { const hh = Number(single[1]); slot = `${hhmm(hh, single[2])}–${hhmm(hh + 2, single[2])}`; }
+    }
+    if (!slot && !range) {
+      if (/après-midi|apres-midi|namiddag|vanmiddag/.test(t)) slot = '13:00–17:00';
+      else if (/(?:^|[^a-zà-ÿ])matin(?![a-zà-ÿ])|ochtend|voormiddag/.test(t)) slot = '09:00–12:00';
+      else if (/(?:^|[^a-zà-ÿ])soir(?![a-zà-ÿ])|avond/.test(t)) slot = '18:00–21:00';
+    }
+    const address = parseContact(text).addresses[0] || null;
+    return { date, slot, address };
+  }
+
+  return { CASH_LIMIT, MENTION, PRIVATE, fromSpeech, checkField, toAmount, parseDelivery, matchCustomer, agreedPrice, contactLinks, message, round2, marginVat, regimeOf, consignment, saleTax, quarterOf, quarterGrids, cashCheck, missingFields,
     structuredComm, validBce, paidAmount, promisedAmount, parseCaption, parseContact, money, date, listingText, peppolUbl, matchPayment, STATE };
 });

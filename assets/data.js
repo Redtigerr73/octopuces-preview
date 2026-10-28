@@ -2,7 +2,8 @@
    Pièces : publications Instagram réelles (titre, prix, dimensions). Prix d'achat, clients, ventes et paiements : FICTIFS. */
 window.SEED = {
   // photos présentes dans assets/photos/ : ajoutez les noms ici quand vous déposez d'autres photos (octo-02.jpg … octo-12.jpg)
-  photosAvailable: ['assets/photos/octo-01.jpg', 'assets/photos/octo-02.jpg'],
+  // photos réelles des publications @octopuceshop (accord du commerçant) ; octo-10 manque : la publication a été retirée d'Instagram
+  photosAvailable: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '11', '12'].map(n => `assets/photos/octo-${n}.jpg`),
   login: { email: 'demo@octopuces.test', password: 'Octo-demo-2026' },
   shop: { name: 'OctoPuces', legal: 'Linthout Arnaud', owner: 'Arnaud', vat: 'BE0844147250', peppol: '0208:0844147250', peppolSince: '2026-04-01',
     address: { street: 'Avenue des Azalées 66 bte ETRC', zip: '1030', city: 'Schaerbeek' }, city: { fr: 'Schaerbeek', nl: 'Schaarbeek' },
@@ -71,7 +72,7 @@ window.SEED = {
       title: { fr: 'Vélo d’enfant', nl: 'Kinderfiets' }, dims: '', state: 'fair', notes: { fr: '', nl: '' }, listings: {}, saleId: 's65' },
   ],
   igPosts: [
-    { code: 'DermQVMjVhg', photo: 'assets/photos/octo-10.jpg', date: '2026-10-27',
+    { code: 'DermQVMjVhg', gone: true, photo: 'assets/photos/octo-10.jpg', date: '2026-10-27',
       caption: '<><> 2 vintage nightstands <><>\n\nA beautiful piece in good condition, full of 60s & 70s charm.\n\nSale price : 120 €\n\nSize : L 59 D 29 H 54\n\n🚚  Free delivery in Brussels and surrounding areas.' },
     { code: 'DehPoSoDVbM', photo: 'assets/photos/octo-12.jpg', date: '2026-10-28',
       caption: '<><> vintage desk <><>\n\nA beautiful piece in great condition, full of 60s & 70s charm.\n\nSale price : 320 €\n\nSize : L 170 D 70 H 74\n\n🚚  Free delivery in Brussels and surrounding areas.' },

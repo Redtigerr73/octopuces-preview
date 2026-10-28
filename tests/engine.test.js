@@ -270,3 +270,78 @@ test('e-mail links refuse hidden recipients; messages have no empty gaps', () =>
   assert.doesNotMatch(m, /undefined|Livraison le|  /);
   assert.doesNotMatch(E.message('delivery', { name: 'Sophie', item: 'Armoire' }, 'fr'), /undefined|le  |entre  /);
 });
+
+test('a delivery message gives date, time slot and address (FR and NL), today = Wednesday 28/10/2026', () => {
+  const T = '2026-10-28';
+  assert.deepEqual(E.parseDelivery('Plutôt samedi entre 14h et 16h svp', T), { date: '2026-10-31', slot: '14:00–16:00', address: null });
+  assert.deepEqual(E.parseDelivery('demain vers 18h ?', T), { date: '2026-10-29', slot: '18:00–20:00', address: null });
+  assert.deepEqual(E.parseDelivery('le 3/11 le matin', T), { date: '2026-11-03', slot: '09:00–12:00', address: null });
+  assert.deepEqual(E.parseDelivery('zaterdag tussen 10u en 12u', T), { date: '2026-10-31', slot: '10:00–12:00', address: null });
+  assert.deepEqual(E.parseDelivery('Kan het op 5 november rond 19u?', T), { date: '2026-11-05', slot: '19:00–21:00', address: null });
+  assert.deepEqual(E.parseDelivery('après-demain 14:30-16:00', T), { date: '2026-10-30', slot: '14:30–16:00', address: null });
+  const moved = E.parseDelivery('Nouvelle adresse : Avenue Louise 54, 1050 Ixelles. Lundi après-midi ?', T);
+  assert.deepEqual(moved, { date: '2026-11-02', slot: '13:00–17:00', address: { street: 'Avenue Louise 54', zip: '1050', city: 'Ixelles' } });
+  assert.deepEqual(E.parseDelivery('le 12/01', T).date, '2027-01-12');
+  assert.deepEqual(E.parseDelivery('merci beaucoup', T), { date: null, slot: null, address: null });
+});
+
+test('delivery parsing ignores quantities, prices, words and house numbers; understands ranges and evenings', () => {
+  const T = '2026-10-28', P = s => E.parseDelivery(s, T);
+  assert.equal(P('canapé 3/4 places, samedi').date, '2026-10-31');
+  assert.equal(P('2-3 personnes pour porter').date, null);
+  assert.equal(P('ok 3.10 € de plus').date, null);
+  assert.equal(P('Tél 0470/12.34.56, livraison le 3/11').date, '2026-11-03');
+  assert.equal(P('kast met 2 uitschuifbare laden').slot, null);
+  assert.equal(P('Avenue Brugmann 12, 1180 Uccle').slot, null);
+  assert.equal(P('entre 9 et 11h').slot, '09:00–11:00');
+  assert.equal(P('tussen 9 en 11 uur').slot, '09:00–11:00');
+  assert.equal(P('entre 16h et 14h').slot, null);
+  assert.equal(P('pas samedi, plutôt dimanche').date, '2026-11-01');
+  assert.deepEqual([P('ce soir').date, P('ce soir').slot], ['2026-10-28', '18:00–21:00']);
+  assert.deepEqual([P('zaterdagavond').date, P('zaterdagavond').slot], ['2026-10-31', '18:00–21:00']);
+  assert.equal(P('vanavond').date, '2026-10-28');
+  assert.equal(P('le 03/11/25').date, null);
+});
+
+test('dictated text is normalised before reading: spoken @, dots, capitals after the postcode', () => {
+  assert.equal(E.fromSpeech('mon mail c\'est sarah point dupont arobase gmail point com'), 'mon mail c\'est sarah.dupont@gmail.com');
+  assert.equal(E.fromSpeech('mijn mail is jan apenstaartje telenet punt be'), 'mijn mail is jan@telenet.be');
+  assert.equal(E.fromSpeech('son compte arobase lea underscore bxl'), 'son compte @lea_bxl');
+  const c = E.parseContact(E.fromSpeech('livraison avenue louise 54 1050 ixelles ok pour 300 euros'));
+  assert.deepEqual(c.addresses, [{ street: 'avenue louise 54', zip: '1050', city: 'Ixelles' }]);
+  assert.equal(c.agreed, 300);
+  assert.deepEqual(E.parseContact(E.fromSpeech('kerkstraat 5 2000 antwerpen')).addresses, [{ street: 'Kerkstraat 5', zip: '2000', city: 'Antwerpen' }]);
+});
+
+test('a name is only taken from an explicit phrase, never from the rest of the chat', () => {
+  assert.deepEqual(E.parseContact('Bonjour, je m’appelle Sarah Dupont, 0470 00 00 55').names, ['Sarah Dupont']);
+  assert.deepEqual(E.parseContact('Mijn naam is Jan Peeters').names, ['Jan Peeters']);
+  assert.deepEqual(E.parseContact('Nom : Léa Martin\nadresse…').names, ['Léa Martin']);
+  assert.deepEqual(E.parseContact('Je suis intéressée par la commode').names, []);
+});
+
+test('each field read from a conversation gets a verdict before it is used', () => {
+  assert.equal(E.checkField('phone', '+32 470 00 00 55'), 'ok');
+  assert.equal(E.checkField('phone', '0470 00 00'), 'bad');
+  assert.equal(E.checkField('email', 'sarah@gmail.com'), 'ok');
+  assert.equal(E.checkField('email', 'sarah@gmail'), 'bad');
+  assert.equal(E.checkField('handle', '@lea_bxl'), 'ok');
+  assert.equal(E.checkField('handle', '@lé a'), 'bad');
+  assert.equal(E.checkField('address', { street: 'Avenue Louise 54', zip: '1050', city: 'Ixelles' }), 'ok');
+  assert.equal(E.checkField('address', { street: 'Avenue Louise', zip: '1050', city: 'Ixelles' }), 'bad');  // pas de numéro
+  assert.equal(E.checkField('address', { street: 'Avenue Louise 54', zip: '105', city: 'Ixelles' }), 'bad');
+  assert.equal(E.checkField('amount', 300), 'ok');
+  assert.equal(E.checkField('amount', 0), 'bad');
+  assert.equal(E.checkField('name', 'Sarah'), 'ok');
+  assert.equal(E.checkField('phone', ''), 'empty');
+});
+
+test('dictated names get their capitals back, foreign numbers and number-first streets are accepted', () => {
+  assert.deepEqual(E.parseContact(E.fromSpeech("je m'appelle léa martin et mon numéro 0470 00 00 77")).names, ['Léa Martin']);
+  assert.deepEqual(E.parseContact(E.fromSpeech('mijn naam is jan peeters')).names, ['Jan Peeters']);
+  assert.equal(E.checkField('phone', '+33 6 12 34 56 78'), 'ok');
+  assert.equal(E.checkField('address', { street: '54 rue de la Paix', zip: '1000', city: 'Bruxelles' }), 'ok');
+  assert.equal(E.checkField('amount', '1 450'), 'ok');
+  assert.equal(E.checkField('amount', '1.450,00'), 'ok');
+  assert.equal(E.checkField('amount', 'abc'), 'bad');
+});
